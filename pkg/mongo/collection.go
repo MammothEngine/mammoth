@@ -30,31 +30,23 @@ func (c *Collection) DB() string { return c.db }
 func (c *Collection) Name() string { return c.name }
 
 // InsertOne inserts a single document. Generates _id if missing.
-func (c *Collection) InsertOne(doc *bson.Document) (bson.ObjectID, error) {
-	id := ensureID(doc)
+func (c *Collection) InsertOne(doc *bson.Document) error {
+	idBytes := ensureID(doc)
 	data := bson.Encode(doc)
-	key := encodeDocKey(c.db, c.name, id[:])
-	if err := c.eng.Put(key, data); err != nil {
-		return bson.ObjectID{}, err
-	}
-	return id, nil
+	key := encodeDocKey(c.db, c.name, idBytes)
+	return c.eng.Put(key, data)
 }
 
 // InsertMany inserts multiple documents atomically.
-func (c *Collection) InsertMany(docs []*bson.Document) ([]bson.ObjectID, error) {
+func (c *Collection) InsertMany(docs []*bson.Document) error {
 	batch := c.eng.NewBatch()
-	ids := make([]bson.ObjectID, len(docs))
-	for i, doc := range docs {
-		id := ensureID(doc)
-		ids[i] = id
+	for _, doc := range docs {
+		idBytes := ensureID(doc)
 		data := bson.Encode(doc)
-		key := encodeDocKey(c.db, c.name, id[:])
+		key := encodeDocKey(c.db, c.name, idBytes)
 		batch.Put(key, data)
 	}
-	if err := batch.Commit(); err != nil {
-		return nil, err
-	}
-	return ids, nil
+	return batch.Commit()
 }
 
 // FindOne retrieves a document by _id.
@@ -114,22 +106,62 @@ func (c *Collection) Count() (int64, error) {
 	return count, nil
 }
 
-// ReplaceOne replaces an entire document by _id.
+// ReplaceOne replaces an entire document by ObjectID _id.
 func (c *Collection) ReplaceOne(id bson.ObjectID, doc *bson.Document) error {
-	// Ensure the _id matches
 	doc.Set("_id", bson.VObjectID(id))
 	data := bson.Encode(doc)
 	key := encodeDocKey(c.db, c.name, id[:])
 	return c.eng.Put(key, data)
 }
 
-// ensureID returns the _id from the document, generating a new ObjectID if missing.
-func ensureID(doc *bson.Document) bson.ObjectID {
+// ReplaceByKey replaces a document using its raw storage key.
+func (c *Collection) ReplaceByKey(keyBytes []byte, doc *bson.Document) error {
+	data := bson.Encode(doc)
+	return c.eng.Put(keyBytes, data)
+}
+
+// ensureID ensures the document has an _id field. If missing, a new ObjectID is generated.
+// Returns the raw bytes of the _id value for use as a storage key.
+func ensureID(doc *bson.Document) []byte {
 	v, ok := doc.Get("_id")
-	if ok && v.Type == bson.TypeObjectID {
-		return v.ObjectID()
+	if ok {
+		return encodeIDValue(v)
 	}
 	id := bson.NewObjectID()
 	doc.Set("_id", bson.VObjectID(id))
-	return id
+	return id[:]
+}
+
+// encodeIDValue converts a BSON _id value to bytes suitable for storage keys.
+func encodeIDValue(v bson.Value) []byte {
+	switch v.Type {
+	case bson.TypeObjectID:
+		oid := v.ObjectID()
+		return oid[:]
+	case bson.TypeString:
+		return []byte(v.String())
+	case bson.TypeInt32:
+		b := make([]byte, 4)
+		b[0] = byte(v.Int32() >> 24)
+		b[1] = byte(v.Int32() >> 16)
+		b[2] = byte(v.Int32() >> 8)
+		b[3] = byte(v.Int32())
+		return b
+	case bson.TypeInt64:
+		b := make([]byte, 8)
+		b[0] = byte(v.Int64() >> 56)
+		b[1] = byte(v.Int64() >> 48)
+		b[2] = byte(v.Int64() >> 40)
+		b[3] = byte(v.Int64() >> 32)
+		b[4] = byte(v.Int64() >> 24)
+		b[5] = byte(v.Int64() >> 16)
+		b[6] = byte(v.Int64() >> 8)
+		b[7] = byte(v.Int64())
+		return b
+	default:
+		// Fallback: encode the full document as the key
+		d := bson.NewDocument()
+		d.Set("_id", v)
+		return bson.Encode(d)
+	}
 }

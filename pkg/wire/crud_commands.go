@@ -9,7 +9,7 @@ func (h *Handler) handleFind(body *bson.Document) *bson.Document {
 	collName := extractCollection(body)
 	db := extractDB(body)
 	if collName == "" {
-		return h.errResponse("find", "collection name required")
+		return errResponseWithCode("find", "collection name required", CodeBadValue)
 	}
 
 	_ = h.cat.EnsureCollection(db, collName)
@@ -69,7 +69,7 @@ func (h *Handler) handleInsert(body *bson.Document) *bson.Document {
 	collName := extractCollection(body)
 	db := extractDB(body)
 	if collName == "" {
-		return h.errResponse("insert", "collection name required")
+		return errResponseWithCode("insert", "collection name required", CodeBadValue)
 	}
 
 	_ = h.cat.EnsureCollection(db, collName)
@@ -84,13 +84,13 @@ func (h *Handler) handleInsert(body *bson.Document) *bson.Document {
 		}
 	}
 
-	ids, err := coll.InsertMany(docs)
+	err := coll.InsertMany(docs)
 	if err != nil {
-		return h.errResponse("insert", err.Error())
+		return errResponseWithCode("insert", err.Error(), mongoErrToCode(err))
 	}
 
 	doc := okDoc()
-	doc.Set("n", bson.VInt32(int32(len(ids))))
+	doc.Set("n", bson.VInt32(int32(len(docs))))
 	return doc
 }
 
@@ -98,7 +98,7 @@ func (h *Handler) handleUpdate(body *bson.Document) *bson.Document {
 	collName := extractCollection(body)
 	db := extractDB(body)
 	if collName == "" {
-		return h.errResponse("update", "collection name required")
+		return errResponseWithCode("update", "collection name required", CodeBadValue)
 	}
 
 	_ = h.cat.EnsureCollection(db, collName)
@@ -127,8 +127,14 @@ func (h *Handler) handleUpdate(body *bson.Document) *bson.Document {
 		matcher := mongo.NewMatcher(filter)
 		prefix := mongo.EncodeNamespacePrefix(db, collName)
 
+		// Collect matching docs first to avoid deadlock (Scan holds read lock, Put needs write lock)
+		type matchEntry struct {
+			key []byte
+			doc *bson.Document
+		}
+		var matches []matchEntry
 		h.engine.Scan(prefix, func(key, value []byte) bool {
-			if !multi && matched > 0 {
+			if !multi && len(matches) > 0 {
 				return false
 			}
 			doc, err := bson.Decode(value)
@@ -138,17 +144,24 @@ func (h *Handler) handleUpdate(body *bson.Document) *bson.Document {
 			if !matcher.Match(doc) {
 				return true
 			}
+			matches = append(matches, matchEntry{
+				key: append([]byte{}, key...),
+				doc: doc,
+			})
+			return true
+		})
+
+		for _, m := range matches {
 			matched++
-			newDoc := mongo.ApplyUpdate(doc, update)
+			newDoc := mongo.ApplyUpdate(m.doc, update)
 			// Preserve _id
-			if idVal, ok := doc.Get("_id"); ok {
+			if idVal, ok := m.doc.Get("_id"); ok {
 				newDoc.Set("_id", idVal)
-				if err := coll.ReplaceOne(idVal.ObjectID(), newDoc); err == nil {
+				if err := coll.ReplaceByKey(m.key, newDoc); err == nil {
 					modified++
 				}
 			}
-			return true
-		})
+		}
 	}
 
 	doc := okDoc()
@@ -162,7 +175,7 @@ func (h *Handler) handleDelete(body *bson.Document) *bson.Document {
 	collName := extractCollection(body)
 	db := extractDB(body)
 	if collName == "" {
-		return h.errResponse("delete", "collection name required")
+		return errResponseWithCode("delete", "collection name required", CodeBadValue)
 	}
 
 	_ = h.cat.EnsureCollection(db, collName)

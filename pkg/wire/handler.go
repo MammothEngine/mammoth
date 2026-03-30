@@ -2,6 +2,7 @@ package wire
 
 import (
 	"log"
+	"strings"
 	"sync/atomic"
 
 	"github.com/mammothengine/mammoth/pkg/bson"
@@ -9,20 +10,35 @@ import (
 	"github.com/mammothengine/mammoth/pkg/mongo"
 )
 
+// MongoDB error codes
+const (
+	CodeInternalError     int32 = 1
+	CodeBadValue          int32 = 2
+	CodeNamespaceNotFound int32 = 26
+	CodeNamespaceExists   int32 = 48
+	CodeCommandNotFound   int32 = 59
+	CodeDuplicateKey      int32 = 110
+)
+
 // Handler dispatches wire protocol commands.
 type Handler struct {
-	engine *engine.Engine
-	cat    *mongo.Catalog
-	cursor *mongo.CursorManager
-	reqID  atomic.Uint64
+	engine    *engine.Engine
+	cat       *mongo.Catalog
+	indexCat  *mongo.IndexCatalog
+	cursor    *mongo.CursorManager
+	reqID     atomic.Uint64
+	processID bson.ObjectID
+	connID    atomic.Uint64
 }
 
 // NewHandler creates a new command handler.
 func NewHandler(eng *engine.Engine, cat *mongo.Catalog) *Handler {
 	return &Handler{
-		engine: eng,
-		cat:    cat,
-		cursor: mongo.NewCursorManager(),
+		engine:    eng,
+		cat:       cat,
+		indexCat:  mongo.NewIndexCatalog(eng, cat),
+		cursor:    mongo.NewCursorManager(),
+		processID: bson.NewObjectID(),
 	}
 }
 
@@ -39,7 +55,7 @@ func (h *Handler) Handle(msg *Message) *bson.Document {
 	body := msg.Body()
 
 	if cmd == "" || body == nil {
-		return h.errResponse("unknown", "empty command")
+		return errResponseWithCode("unknown", "empty command", CodeBadValue)
 	}
 
 	log.Printf("cmd: %s", cmd)
@@ -52,7 +68,7 @@ func (h *Handler) Handle(msg *Message) *bson.Document {
 	case "buildInfo", "buildinfo":
 		return h.handleBuildInfo()
 	case "whatsmyuri":
-		return h.handleWhatsmyuri()
+		return h.handleWhatsmyuri(msg)
 	case "getCmdLineOpts":
 		return h.handleGetCmdLineOpts()
 	case "listDatabases":
@@ -83,8 +99,20 @@ func (h *Handler) Handle(msg *Message) *bson.Document {
 		return h.handleListIndexes(body)
 	case "serverStatus":
 		return h.handleServerStatus()
+	case "startSession":
+		return h.handleStartSession()
+	case "endSessions":
+		return okDoc()
+	case "connectionStatus":
+		return h.handleConnectionStatus()
+	case "dropDatabase":
+		return h.handleDropDatabase(body)
+	case "aggregate":
+		return h.handleAggregate(body)
+	case "count":
+		return h.handleCount(body)
 	default:
-		return h.errResponse(cmd, "unknown command")
+		return errResponseWithCode(cmd, "unknown command", CodeCommandNotFound)
 	}
 }
 
@@ -96,13 +124,47 @@ func okDoc() *bson.Document {
 	return doc
 }
 
-func (h *Handler) errResponse(cmd, msg string) *bson.Document {
+func errResponseWithCode(cmd string, msg string, code int32) *bson.Document {
 	doc := bson.NewDocument()
 	doc.Set("ok", bson.VDouble(0.0))
 	doc.Set("errmsg", bson.VString(msg))
-	doc.Set("code", bson.VInt32(0))
-	doc.Set("codeName", bson.VString("UnknownError"))
+	doc.Set("code", bson.VInt32(code))
+	doc.Set("codeName", bson.VString(codeName(code)))
 	return doc
+}
+
+func codeName(code int32) string {
+	switch code {
+	case CodeInternalError:
+		return "InternalError"
+	case CodeBadValue:
+		return "BadValue"
+	case CodeNamespaceNotFound:
+		return "NamespaceNotFound"
+	case CodeNamespaceExists:
+		return "NamespaceExists"
+	case CodeCommandNotFound:
+		return "CommandNotFound"
+	case CodeDuplicateKey:
+		return "DuplicateKey"
+	default:
+		return "UnknownError"
+	}
+}
+
+func mongoErrToCode(err error) int32 {
+	if err == nil {
+		return 0
+	}
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "not found"):
+		return CodeNamespaceNotFound
+	case strings.Contains(msg, "already exists") || strings.Contains(msg, "duplicate"):
+		return CodeNamespaceExists
+	default:
+		return CodeInternalError
+	}
 }
 
 func getStringFromBody(body *bson.Document, key string) string {

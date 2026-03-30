@@ -24,8 +24,9 @@ type MsgHeader struct {
 
 // Message represents a parsed wire protocol message.
 type Message struct {
-	Header MsgHeader
-	Msg    *OPMsg
+	Header     MsgHeader
+	Msg        *OPMsg
+	RemoteAddr string
 }
 
 // OPMsg represents an OP_MSG message (MongoDB 3.6+).

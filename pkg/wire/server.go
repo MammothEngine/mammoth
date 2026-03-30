@@ -81,6 +81,7 @@ func (s *Server) Close() error {
 
 func (s *Server) handleConn(conn net.Conn) {
 	defer conn.Close()
+	remoteAddr := conn.RemoteAddr().String()
 
 	for !s.closed.Load() {
 		msg, err := ReadMessage(conn)
@@ -94,6 +95,7 @@ func (s *Server) handleConn(conn net.Conn) {
 			continue
 		}
 
+		msg.RemoteAddr = remoteAddr
 		response := s.handler.Handle(msg)
 		if response != nil {
 			if err := WriteMessage(conn, msg.Header.RequestID, 0, response); err != nil {

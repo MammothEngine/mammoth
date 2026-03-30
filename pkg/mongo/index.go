@@ -108,7 +108,9 @@ func flipForDescending(b []byte) {
 }
 
 // buildIndexKey builds the engine key for an index entry.
+// Format: {ns_prefix}\x00idx{index_name}{encoded_values}{_id_bytes}
 func buildIndexKey(db, coll string, spec *IndexSpec, doc *bson.Document, id []byte) []byte {
+	ns := EncodeNamespacePrefix(db, coll)
 	encodedVals := make([][]byte, 0, len(spec.Key))
 	for _, ik := range spec.Key {
 		v, found := resolveField(doc, ik.Field)
@@ -119,7 +121,10 @@ func buildIndexKey(db, coll string, spec *IndexSpec, doc *bson.Document, id []by
 			encoded = []byte{typeTagNull}
 		}
 		if ik.Descending {
-			flipForDescending(encoded)
+			flipped := make([]byte, len(encoded))
+			copy(flipped, encoded)
+			flipForDescending(flipped)
+			encoded = flipped
 		}
 		encodedVals = append(encodedVals, encoded)
 	}
@@ -131,7 +136,10 @@ func buildIndexKey(db, coll string, spec *IndexSpec, doc *bson.Document, id []by
 	}
 	totalLen += len(id)
 
-	buf := make([]byte, 0, totalLen)
+	buf := make([]byte, 0, len(ns)+len(indexSeparator)+len(spec.Name)+totalLen)
+	buf = append(buf, ns...)
+	buf = append(buf, indexSeparator...)
+	buf = append(buf, spec.Name...)
 	for _, ev := range encodedVals {
 		buf = append(buf, ev...)
 	}
@@ -163,13 +171,48 @@ func (idx *Index) AddEntry(doc *bson.Document) error {
 	}
 	key := buildIndexKey(idx.db, idx.coll, idx.spec, doc, idVal.ObjectID().Bytes())
 
-	// Check unique constraint
+	// Check unique constraint: scan for any existing entry with same indexed values
 	if idx.spec.Unique {
-		if existing, err := idx.eng.Get(key); err == nil && len(existing) > 0 {
+		prefix := buildUniquePrefix(idx.db, idx.coll, idx.spec, doc)
+		found := false
+		idx.eng.Scan(prefix, func(_, _ []byte) bool {
+			found = true
+			return false
+		})
+		if found {
 			return ErrDuplicateKey
 		}
 	}
 	return idx.eng.Put(key, []byte{1})
+}
+
+// buildUniquePrefix returns the key prefix containing only the indexed field values
+// (without the _id suffix) for unique constraint checking.
+func buildUniquePrefix(db, coll string, spec *IndexSpec, doc *bson.Document) []byte {
+	ns := EncodeNamespacePrefix(db, coll)
+	buf := make([]byte, 0, len(ns)+len(indexSeparator)+len(spec.Name)+64)
+	buf = append(buf, ns...)
+	buf = append(buf, indexSeparator...)
+	buf = append(buf, spec.Name...)
+
+	for _, ik := range spec.Key {
+		v, found := resolveField(doc, ik.Field)
+		var encoded []byte
+		if found {
+			encoded = encodeIndexValue(v)
+		} else {
+			encoded = []byte{typeTagNull}
+		}
+		if ik.Descending {
+			flipped := make([]byte, len(encoded))
+			copy(flipped, encoded)
+			flipForDescending(flipped)
+			buf = append(buf, flipped...)
+		} else {
+			buf = append(buf, encoded...)
+		}
+	}
+	return buf
 }
 
 // RemoveEntry removes an index entry for a document.

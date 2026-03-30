@@ -210,7 +210,7 @@ func matchOperator(op string, opVal bson.Value, fieldVal bson.Value, fieldFound 
 	case "$not":
 		// $not inverts the inner operator document
 		if opVal.Type == bson.TypeDocument {
-			return !matchDocument(opVal.DocumentValue(), bson.NewDocument())
+			return !matchFieldCondition(opVal, fieldVal, fieldFound)
 		}
 		return true
 	}

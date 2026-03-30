@@ -67,6 +67,7 @@ type CursorManager struct {
 	mu      sync.RWMutex
 	cursors map[uint64]*cursorEntry
 	nextID  atomic.Uint64
+	done    chan struct{}
 }
 
 type cursorEntry struct {
@@ -78,6 +79,7 @@ type cursorEntry struct {
 func NewCursorManager() *CursorManager {
 	cm := &CursorManager{
 		cursors: make(map[uint64]*cursorEntry),
+		done:    make(chan struct{}),
 	}
 	cm.nextID.Store(1)
 	go cm.cleanup()
@@ -123,9 +125,15 @@ func (cm *CursorManager) Kill(ids []uint64) {
 	cm.mu.Unlock()
 }
 
-// Close removes all cursors.
+// Close removes all cursors and stops the cleanup goroutine.
 func (cm *CursorManager) Close() {
 	cm.mu.Lock()
+	select {
+	case <-cm.done:
+		// already closed
+	default:
+		close(cm.done)
+	}
 	cm.cursors = nil
 	cm.mu.Unlock()
 }
@@ -133,14 +141,23 @@ func (cm *CursorManager) Close() {
 func (cm *CursorManager) cleanup() {
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
-	for range ticker.C {
-		cm.mu.Lock()
-		now := time.Now()
-		for id, entry := range cm.cursors {
-			if now.Sub(entry.lastUsed) > cursorTimeout {
-				delete(cm.cursors, id)
+	for {
+		select {
+		case <-cm.done:
+			return
+		case <-ticker.C:
+			cm.mu.Lock()
+			if cm.cursors == nil {
+				cm.mu.Unlock()
+				return
 			}
+			now := time.Now()
+			for id, entry := range cm.cursors {
+				if now.Sub(entry.lastUsed) > cursorTimeout {
+					delete(cm.cursors, id)
+				}
+			}
+			cm.mu.Unlock()
 		}
-		cm.mu.Unlock()
 	}
 }

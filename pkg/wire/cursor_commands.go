@@ -18,7 +18,7 @@ func (h *Handler) handleGetMore(body *bson.Document) *bson.Document {
 
 	cursor, ok := h.cursor.Get(id)
 	if !ok {
-		return h.errResponse("getMore", "cursor not found")
+		return errResponseWithCode("getMore", "cursor not found", CodeBadValue)
 	}
 
 	batchSize := getInt32FromBody(body, "batchSize")
