@@ -3,8 +3,9 @@ package engine
 import "errors"
 
 var (
-	errEngineClosed        = errors.New("engine: closed")
+	errEngineClosed          = errors.New("engine: closed")
 	errBatchAlreadyCommitted = errors.New("engine: batch already committed")
-	errSnapshotReleased    = errors.New("engine: snapshot released")
-	errKeyNotFound         = errors.New("engine: key not found")
+	errSnapshotReleased      = errors.New("engine: snapshot released")
+	errKeyNotFound           = errors.New("engine: key not found")
+	errTransactionFinished   = errors.New("engine: transaction already finished")
 )

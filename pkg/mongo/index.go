@@ -10,9 +10,12 @@ import (
 
 // IndexSpec describes a secondary index.
 type IndexSpec struct {
-	Name   string       `json:"name"`
-	Key    []IndexKey   `json:"key"`
-	Unique bool         `json:"unique"`
+	Name                    string         `json:"name"`
+	Key                     []IndexKey     `json:"key"`
+	Unique                  bool           `json:"unique"`
+	Sparse                  bool           `json:"sparse,omitempty"`
+	ExpireAfterSeconds      int32          `json:"expireAfterSeconds,omitempty"`
+	PartialFilterExpression *bson.Document `json:"partialFilterExpression,omitempty"`
 }
 
 // IndexKey describes one component of a compound index key.
@@ -147,6 +150,26 @@ func buildIndexKey(db, coll string, spec *IndexSpec, doc *bson.Document, id []by
 	return buf
 }
 
+// buildIndexKeyWithValue builds an index key for a single scalar value (used for multikey).
+func buildIndexKeyWithValue(db, coll string, spec *IndexSpec, val bson.Value, id []byte) []byte {
+	ns := EncodeNamespacePrefix(db, coll)
+	encoded := encodeIndexValue(val)
+	if spec.Key[0].Descending {
+		flipped := make([]byte, len(encoded))
+		copy(flipped, encoded)
+		flipForDescending(flipped)
+		encoded = flipped
+	}
+
+	buf := make([]byte, 0, len(ns)+len(indexSeparator)+len(spec.Name)+len(encoded)+len(id))
+	buf = append(buf, ns...)
+	buf = append(buf, indexSeparator...)
+	buf = append(buf, spec.Name...)
+	buf = append(buf, encoded...)
+	buf = append(buf, id...)
+	return buf
+}
+
 // Index manages a single secondary index.
 type Index struct {
 	spec *IndexSpec
@@ -169,11 +192,58 @@ func (idx *Index) AddEntry(doc *bson.Document) error {
 	if !ok {
 		return nil
 	}
-	key := buildIndexKey(idx.db, idx.coll, idx.spec, doc, idVal.ObjectID().Bytes())
+	idBytes := idVal.ObjectID().Bytes()
 
-	// Check unique constraint: scan for any existing entry with same indexed values
+	// Partial index: skip if document doesn't match filter
+	if idx.spec.PartialFilterExpression != nil {
+		m := NewMatcher(idx.spec.PartialFilterExpression)
+		if !m.Match(doc) {
+			return nil
+		}
+	}
+
+	for _, ik := range idx.spec.Key {
+		v, found := ResolveField(doc, ik.Field)
+
+		// Sparse index: skip documents missing the indexed field
+		if !found && idx.spec.Sparse {
+			return nil
+		}
+
+		if !found {
+			v = bson.VNull()
+		}
+
+		// Multikey: if value is an array, create one entry per element
+		if v.Type == bson.TypeArray && len(idx.spec.Key) == 1 {
+			arr := v.ArrayValue()
+			if len(arr) == 0 {
+				// Empty array: store null entry
+				key := buildIndexKeyWithValue(idx.db, idx.coll, idx.spec, bson.VNull(), idBytes)
+				if err := idx.putEntry(key); err != nil {
+					return err
+				}
+			} else {
+				for _, elem := range arr {
+					key := buildIndexKeyWithValue(idx.db, idx.coll, idx.spec, elem, idBytes)
+					if err := idx.putEntry(key); err != nil {
+						return err
+					}
+				}
+			}
+			return nil
+		}
+	}
+
+	// Non-multikey path (single value or compound key)
+	key := buildIndexKey(idx.db, idx.coll, idx.spec, doc, idBytes)
+	return idx.putEntry(key)
+}
+
+// putEntry writes an index entry, checking unique constraints.
+func (idx *Index) putEntry(key []byte) error {
 	if idx.spec.Unique {
-		prefix := buildUniquePrefix(idx.db, idx.coll, idx.spec, doc)
+		prefix := idx.uniquePrefixFromKey(key)
 		found := false
 		idx.eng.Scan(prefix, func(_, _ []byte) bool {
 			found = true
@@ -186,42 +256,48 @@ func (idx *Index) AddEntry(doc *bson.Document) error {
 	return idx.eng.Put(key, []byte{1})
 }
 
-// buildUniquePrefix returns the key prefix containing only the indexed field values
-// (without the _id suffix) for unique constraint checking.
-func buildUniquePrefix(db, coll string, spec *IndexSpec, doc *bson.Document) []byte {
-	ns := EncodeNamespacePrefix(db, coll)
-	buf := make([]byte, 0, len(ns)+len(indexSeparator)+len(spec.Name)+64)
-	buf = append(buf, ns...)
-	buf = append(buf, indexSeparator...)
-	buf = append(buf, spec.Name...)
-
-	for _, ik := range spec.Key {
-		v, found := ResolveField(doc, ik.Field)
-		var encoded []byte
-		if found {
-			encoded = encodeIndexValue(v)
-		} else {
-			encoded = []byte{typeTagNull}
-		}
-		if ik.Descending {
-			flipped := make([]byte, len(encoded))
-			copy(flipped, encoded)
-			flipForDescending(flipped)
-			buf = append(buf, flipped...)
-		} else {
-			buf = append(buf, encoded...)
-		}
+// uniquePrefixFromKey extracts the unique prefix (without _id suffix) from a full index key.
+func (idx *Index) uniquePrefixFromKey(fullKey []byte) []byte {
+	// The _id suffix is always 12 bytes (ObjectID). For unique check, we scan the prefix
+	// without those last 12 bytes.
+	if len(fullKey) > 12 {
+		return fullKey[:len(fullKey)-12]
 	}
-	return buf
+	return fullKey
 }
 
 // RemoveEntry removes an index entry for a document.
+// For multikey indexes, removes all entries created for the document's array elements.
 func (idx *Index) RemoveEntry(doc *bson.Document) error {
 	idVal, ok := doc.Get("_id")
 	if !ok {
 		return nil
 	}
-	key := buildIndexKey(idx.db, idx.coll, idx.spec, doc, idVal.ObjectID().Bytes())
+	idBytes := idVal.ObjectID().Bytes()
+
+	// For multikey, scan the index prefix with _id suffix to find all entries
+	for _, ik := range idx.spec.Key {
+		v, found := ResolveField(doc, ik.Field)
+		if !found && idx.spec.Sparse {
+			return nil
+		}
+
+		if found && v.Type == bson.TypeArray && len(idx.spec.Key) == 1 {
+			arr := v.ArrayValue()
+			if len(arr) == 0 {
+				key := buildIndexKeyWithValue(idx.db, idx.coll, idx.spec, bson.VNull(), idBytes)
+				_ = idx.eng.Delete(key)
+			} else {
+				for _, elem := range arr {
+					key := buildIndexKeyWithValue(idx.db, idx.coll, idx.spec, elem, idBytes)
+					_ = idx.eng.Delete(key)
+				}
+			}
+			return nil
+		}
+	}
+
+	key := buildIndexKey(idx.db, idx.coll, idx.spec, doc, idBytes)
 	return idx.eng.Delete(key)
 }
 

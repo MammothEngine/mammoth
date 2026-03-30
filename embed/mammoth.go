@@ -311,7 +311,7 @@ func (c *Collection) UpdateOne(filter, update *Document) (matched, modified int,
 
 	for _, m := range matches {
 		matched++
-		newDoc := mongo.ApplyUpdate(m.doc, update)
+		newDoc := mongo.ApplyUpdate(m.doc, update, false)
 		if idVal, ok := m.doc.Get("_id"); ok {
 			newDoc.Set("_id", idVal)
 			if err := c.coll.ReplaceByKey(m.key, newDoc); err == nil {

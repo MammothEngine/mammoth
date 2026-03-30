@@ -158,6 +158,14 @@ func (ic *IndexCatalog) OnDocumentUpdate(db, coll string, oldDoc, newDoc *bson.D
 	return nil
 }
 
+// IndexBounds describes lower and upper bounds for a range predicate on an indexed field.
+type IndexBounds struct {
+	Field    string
+	Low      []byte // inclusive lower bound
+	High     []byte // exclusive upper bound
+	Equality bool   // exact match
+}
+
 // FindBestIndex finds the best index for a query filter.
 // Returns the index spec, the encoded prefix key for scanning, and whether an index was found.
 func (ic *IndexCatalog) FindBestIndex(db, coll string, filter *bson.Document) (spec *IndexSpec, prefixKey []byte, ok bool) {
@@ -166,29 +174,17 @@ func (ic *IndexCatalog) FindBestIndex(db, coll string, filter *bson.Document) (s
 		return nil, nil, false
 	}
 
-	filterKeys := filter.Keys()
-	filterSet := make(map[string]bool, len(filterKeys))
-	for _, k := range filterKeys {
-		filterSet[k] = true
-	}
+	// Analyze filter to extract field constraints
+	filterFields := analyzeFilterFields(filter)
 
 	var bestSpec *IndexSpec
-	bestMatchCount := 0
+	bestScore := 0
 
 	for i := range indexes {
-		matchCount := 0
-		allPrefix := true
-		for _, ik := range indexes[i].Key {
-			if filterSet[ik.Field] {
-				matchCount++
-			} else {
-				allPrefix = false
-				break
-			}
-		}
-		if allPrefix && matchCount > bestMatchCount {
+		score := scoreIndex(&indexes[i], filterFields)
+		if score > bestScore {
 			bestSpec = &indexes[i]
-			bestMatchCount = matchCount
+			bestScore = score
 		}
 	}
 
@@ -197,17 +193,87 @@ func (ic *IndexCatalog) FindBestIndex(db, coll string, filter *bson.Document) (s
 	}
 
 	// Build the prefix key for the index lookup
+	prefixKey = buildIndexScanKey(db, coll, bestSpec, filter)
+	return bestSpec, prefixKey, true
+}
+
+// analyzeFilterFields extracts per-field information from a filter.
+func analyzeFilterFields(filter *bson.Document) map[string]filterFieldInfo {
+	if filter == nil {
+		return nil
+	}
+	result := make(map[string]filterFieldInfo, filter.Len())
+	for _, e := range filter.Elements() {
+		info := filterFieldInfo{equality: true}
+		if e.Value.Type == bson.TypeDocument {
+			// Check for operator expressions
+			opDoc := e.Value.DocumentValue()
+			hasRange := false
+			for _, oe := range opDoc.Elements() {
+				switch oe.Key {
+				case "$gt", "$gte", "$lt", "$lte":
+					hasRange = true
+					info.equality = false
+				case "$eq":
+					// Still equality
+				default:
+					info.equality = false
+				}
+			}
+			info.hasRange = hasRange
+		}
+		result[e.Key] = info
+	}
+	return result
+}
+
+type filterFieldInfo struct {
+	equality bool
+	hasRange bool
+}
+
+// scoreIndex returns a score for how well an index matches the filter.
+// Higher is better.
+func scoreIndex(spec *IndexSpec, fields map[string]filterFieldInfo) int {
+	score := 0
+	for _, ik := range spec.Key {
+		info, found := fields[ik.Field]
+		if !found {
+			break // prefix must be contiguous
+		}
+		if info.equality {
+			score += 2 // equality is most selective
+		} else if info.hasRange {
+			score += 1 // range is less selective but still usable
+		} else {
+			break
+		}
+	}
+	return score
+}
+
+// buildIndexScanKey builds the encoded prefix key for index scanning.
+func buildIndexScanKey(db, coll string, spec *IndexSpec, filter *bson.Document) []byte {
 	ns := EncodeNamespacePrefix(db, coll)
-	buf := make([]byte, 0, len(ns)+len(indexSeparator)+len(bestSpec.Name)+64)
+	buf := make([]byte, 0, len(ns)+len(indexSeparator)+len(spec.Name)+64)
 	buf = append(buf, ns...)
 	buf = append(buf, indexSeparator...)
-	buf = append(buf, bestSpec.Name...)
+	buf = append(buf, spec.Name...)
 
-	// Encode the filter values that match the index key fields
-	for _, ik := range bestSpec.Key {
+	// Encode equality filter values
+	for _, ik := range spec.Key {
 		v, found := filter.Get(ik.Field)
 		if !found {
 			break
+		}
+		// Check if it's an operator expression
+		if v.Type == bson.TypeDocument {
+			opDoc := v.DocumentValue()
+			if eqVal, ok := opDoc.Get("$eq"); ok {
+				v = eqVal
+			} else {
+				break // Can't use range for prefix, stop here
+			}
 		}
 		encoded := encodeIndexValue(v)
 		if ik.Descending {
@@ -219,5 +285,5 @@ func (ic *IndexCatalog) FindBestIndex(db, coll string, filter *bson.Document) (s
 		buf = append(buf, encoded...)
 	}
 
-	return bestSpec, buf, true
+	return buf
 }

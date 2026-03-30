@@ -48,6 +48,7 @@ type Handler struct {
 	connCountFn      func() int64
 	oplog            *mongo.Oplog
 	changeStreamMgr  *mongo.ChangeStreamManager
+	opTracker        *opTracker
 }
 
 // NewHandler creates a new command handler.
@@ -63,6 +64,7 @@ func NewHandler(eng *engine.Engine, cat *mongo.Catalog, authMgr *auth.AuthManage
 		log:             logging.Default().WithComponent("wire"),
 		oplog:           mongo.NewOplog(eng),
 		changeStreamMgr: mongo.NewChangeStreamManager(eng),
+		opTracker:       newOpTracker(),
 	}
 }
 
@@ -175,6 +177,20 @@ func (h *Handler) Handle(msg *Message) *bson.Document {
 		response = h.handleAggregate(body)
 	case "count":
 		response = h.handleCount(body)
+	case "findAndModify":
+		response = h.handleFindAndModify(body)
+	case "distinct":
+		response = h.handleDistinct(body)
+	case "explain":
+		response = h.handleExplain(body)
+	case "currentOp":
+		response = h.handleCurrentOp(body)
+	case "killOp":
+		response = h.handleKillOp(body)
+	case "collStats":
+		response = h.handleCollStats(body)
+	case "dbStats":
+		response = h.handleDbStats(body)
 	case "saslStart":
 		response = h.handleSaslStart(body, msg.ConnID)
 	case "saslContinue":

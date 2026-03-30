@@ -9,12 +9,17 @@ import (
 
 // ApplyUpdate applies update operators to a document, returning the modified doc.
 // The original document is not mutated; a new document is returned.
-func ApplyUpdate(doc *bson.Document, update *bson.Document) *bson.Document {
+// isInsert should be true when the update is part of an upsert that creates a new document.
+func ApplyUpdate(doc *bson.Document, update *bson.Document, isInsert bool) *bson.Document {
 	result := cloneDocument(doc)
 	for _, e := range update.Elements() {
 		switch e.Key {
 		case "$set":
 			applySet(result, e.Value.DocumentValue())
+		case "$setOnInsert":
+			if isInsert {
+				applySet(result, e.Value.DocumentValue())
+			}
 		case "$unset":
 			applyUnset(result, e.Value.DocumentValue())
 		case "$inc":

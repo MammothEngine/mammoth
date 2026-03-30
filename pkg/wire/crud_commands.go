@@ -1,6 +1,8 @@
 package wire
 
 import (
+	"fmt"
+
 	"github.com/mammothengine/mammoth/pkg/bson"
 	"github.com/mammothengine/mammoth/pkg/mongo"
 )
@@ -213,7 +215,7 @@ func (h *Handler) handleUpdate(body *bson.Document) *bson.Document {
 			for _, m := range matches {
 				matched++
 				oldDoc := m.doc
-				newDoc := mongo.ApplyUpdate(oldDoc, update)
+				newDoc := mongo.ApplyUpdate(oldDoc, update, false)
 				// Preserve _id
 				if idVal, ok := oldDoc.Get("_id"); ok {
 					newDoc.Set("_id", idVal)
@@ -244,7 +246,7 @@ func (h *Handler) handleUpdate(body *bson.Document) *bson.Document {
 					newDoc.Set(e.Key, e.Value)
 				}
 			}
-			newDoc = mongo.ApplyUpdate(newDoc, update)
+			newDoc = mongo.ApplyUpdate(newDoc, update, true)
 			// Generate _id if not present
 			if _, ok := newDoc.Get("_id"); !ok {
 				newDoc.Set("_id", bson.VObjectID(bson.NewObjectID()))
@@ -359,4 +361,87 @@ func docsToValues(docs []*bson.Document) bson.Array {
 		arr[i] = bson.VDoc(d)
 	}
 	return arr
+}
+
+func (h *Handler) handleDistinct(body *bson.Document) *bson.Document {
+	collName := extractCollection(body)
+	db := extractDB(body)
+	if collName == "" {
+		return errResponseWithCode("distinct", "collection name required", CodeBadValue)
+	}
+
+	key := getStringFromBody(body, "key")
+	if key == "" {
+		return errResponseWithCode("distinct", "key required", CodeBadValue)
+	}
+
+	_ = h.cat.EnsureCollection(db, collName)
+
+	filter := getDocFromBody(body, "query")
+	if filter == nil {
+		filter = bson.NewDocument()
+	}
+	matcher := mongo.NewMatcher(filter)
+
+	prefix := mongo.EncodeNamespacePrefix(db, collName)
+	seen := make(map[string]bool)
+	var values bson.Array
+
+	h.engine.Scan(prefix, func(_, value []byte) bool {
+		doc, err := bson.Decode(value)
+		if err != nil {
+			return true
+		}
+		if !matcher.Match(doc) {
+			return true
+		}
+
+		v, found := mongo.ResolveField(doc, key)
+		if !found {
+			return true
+		}
+
+		// Flatten arrays
+		if v.Type == bson.TypeArray {
+			for _, elem := range v.ArrayValue() {
+				key := distinctKey(elem)
+				if !seen[key] {
+					seen[key] = true
+					values = append(values, elem)
+				}
+			}
+		} else {
+			key := distinctKey(v)
+			if !seen[key] {
+				seen[key] = true
+				values = append(values, v)
+			}
+		}
+		return true
+	})
+
+	doc := okDoc()
+	doc.Set("values", bson.VArray(values))
+	return doc
+}
+
+func distinctKey(v bson.Value) string {
+	switch v.Type {
+	case bson.TypeString:
+		return "s:" + v.String()
+	case bson.TypeInt32:
+		return fmt.Sprintf("i:%d", v.Int32())
+	case bson.TypeInt64:
+		return fmt.Sprintf("l:%d", v.Int64())
+	case bson.TypeDouble:
+		return fmt.Sprintf("d:%v", v.Double())
+	case bson.TypeBoolean:
+		return fmt.Sprintf("b:%v", v.Boolean())
+	case bson.TypeNull:
+		return "n:"
+	case bson.TypeObjectID:
+		return "o:" + string(v.ObjectID().Bytes())
+	default:
+		return fmt.Sprintf("%d:%v", v.Type, v.Interface())
+	}
 }

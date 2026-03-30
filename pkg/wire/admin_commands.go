@@ -160,10 +160,33 @@ func (h *Handler) handleCreateIndexes(body *bson.Document) *bson.Document {
 			unique = u.Boolean()
 		}
 
+		// Extract sparse flag
+		sparse := false
+		if s, ok := idxDoc.Get("sparse"); ok && s.Type == bson.TypeBoolean {
+			sparse = s.Boolean()
+		}
+
+		// Extract expireAfterSeconds
+		var expireAfter int32
+		if eas, ok := idxDoc.Get("expireAfterSeconds"); ok {
+			if eas.Type == bson.TypeInt32 {
+				expireAfter = eas.Int32()
+			}
+		}
+
+		// Extract partialFilterExpression
+		var partialFilter *bson.Document
+		if pf, ok := idxDoc.Get("partialFilterExpression"); ok && pf.Type == bson.TypeDocument {
+			partialFilter = pf.DocumentValue()
+		}
+
 		spec := mongo.IndexSpec{
-			Name:   name,
-			Key:    keys,
-			Unique: unique,
+			Name:                    name,
+			Key:                     keys,
+			Unique:                  unique,
+			Sparse:                  sparse,
+			ExpireAfterSeconds:      expireAfter,
+			PartialFilterExpression: partialFilter,
 		}
 
 		if err := h.indexCat.CreateIndex(db, collName, spec); err != nil {
@@ -324,4 +347,77 @@ func (h *Handler) handleCollMod(body *bson.Document) *bson.Document {
 	}
 
 	return okDoc()
+}
+
+func (h *Handler) handleCollStats(body *bson.Document) *bson.Document {
+	db := extractDB(body)
+	collName := getStringFromBody(body, "collStats")
+	if db == "" || collName == "" {
+		return errResponseWithCode("collStats", "collection name required", CodeBadValue)
+	}
+
+	_ = h.cat.EnsureCollection(db, collName)
+
+	var count int64
+	var totalSize int64
+	prefix := mongo.EncodeNamespacePrefix(db, collName)
+	h.engine.Scan(prefix, func(_, value []byte) bool {
+		count++
+		totalSize += int64(len(value))
+		return true
+	})
+
+	var avgObjSize int64
+	if count > 0 {
+		avgObjSize = totalSize / count
+	}
+
+	// Count indexes
+	indexes, _ := h.indexCat.ListIndexes(db, collName)
+	nIndexes := 1 + len(indexes) // _id + user indexes
+
+	doc := okDoc()
+	doc.Set("ns", bson.VString(db + "." + collName))
+	doc.Set("count", bson.VInt64(count))
+	doc.Set("size", bson.VInt64(totalSize))
+	doc.Set("avgObjSize", bson.VInt64(avgObjSize))
+	doc.Set("nIndexes", bson.VInt32(int32(nIndexes)))
+	doc.Set("totalIndexSize", bson.VInt64(0))
+	return doc
+}
+
+func (h *Handler) handleDbStats(body *bson.Document) *bson.Document {
+	db := extractDB(body)
+	if db == "" {
+		return errResponseWithCode("dbStats", "database name required", CodeBadValue)
+	}
+
+	colls, err := h.cat.ListCollections(db)
+	if err != nil {
+		return errResponseWithCode("dbStats", err.Error(), mongoErrToCode(err))
+	}
+
+	var objects int64
+	var dataSize int64
+	var totalIndexes int
+
+	for _, c := range colls {
+		prefix := mongo.EncodeNamespacePrefix(db, c.Name)
+		h.engine.Scan(prefix, func(_, value []byte) bool {
+			objects++
+			dataSize += int64(len(value))
+			return true
+		})
+
+		indexes, _ := h.indexCat.ListIndexes(db, c.Name)
+		totalIndexes += 1 + len(indexes) // _id + user indexes
+	}
+
+	doc := okDoc()
+	doc.Set("db", bson.VString(db))
+	doc.Set("collections", bson.VInt32(int32(len(colls))))
+	doc.Set("objects", bson.VInt64(objects))
+	doc.Set("dataSize", bson.VInt64(dataSize))
+	doc.Set("indexes", bson.VInt32(int32(totalIndexes)))
+	return doc
 }

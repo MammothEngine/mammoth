@@ -8,7 +8,7 @@ import (
 
 func applyUpdate(t *testing.T, doc, update *bson.Document) *bson.Document {
 	t.Helper()
-	return ApplyUpdate(doc, update)
+	return ApplyUpdate(doc, update, false)
 }
 
 func TestUpdate_Set(t *testing.T) {
@@ -339,7 +339,7 @@ func TestUpdate_DoesNotMutateOriginal(t *testing.T) {
 	update := bson.NewDocument()
 	update.Set("$set", bson.VDoc(set))
 
-	result := ApplyUpdate(doc, update)
+	result := ApplyUpdate(doc, update, false)
 
 	// Original should not be modified
 	if v, _ := doc.Get("a"); v.Int32() != 1 {
