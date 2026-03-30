@@ -33,32 +33,36 @@ type HandlerMetrics struct {
 
 // Handler dispatches wire protocol commands.
 type Handler struct {
-	engine    *engine.Engine
-	cat       *mongo.Catalog
-	indexCat  *mongo.IndexCatalog
-	cursor    *mongo.CursorManager
-	reqID     atomic.Uint64
-	processID bson.ObjectID
-	connID    atomic.Uint64
-	authMgr   *auth.AuthManager
-	metrics   *HandlerMetrics
-	slowQuery *SlowQueryProfiler
-	startTime time.Time
-	log       *logging.Logger
-	connCountFn func() int64
+	engine           *engine.Engine
+	cat              *mongo.Catalog
+	indexCat         *mongo.IndexCatalog
+	cursor           *mongo.CursorManager
+	reqID            atomic.Uint64
+	processID        bson.ObjectID
+	connID           atomic.Uint64
+	authMgr          *auth.AuthManager
+	metrics          *HandlerMetrics
+	slowQuery        *SlowQueryProfiler
+	startTime        time.Time
+	log              *logging.Logger
+	connCountFn      func() int64
+	oplog            *mongo.Oplog
+	changeStreamMgr  *mongo.ChangeStreamManager
 }
 
 // NewHandler creates a new command handler.
 func NewHandler(eng *engine.Engine, cat *mongo.Catalog, authMgr *auth.AuthManager) *Handler {
 	return &Handler{
-		engine:    eng,
-		cat:       cat,
-		indexCat:  mongo.NewIndexCatalog(eng, cat),
-		cursor:    mongo.NewCursorManager(),
-		processID: bson.NewObjectID(),
-		authMgr:   authMgr,
-		startTime: time.Now(),
-		log:       logging.Default().WithComponent("wire"),
+		engine:          eng,
+		cat:             cat,
+		indexCat:        mongo.NewIndexCatalog(eng, cat),
+		cursor:          mongo.NewCursorManager(),
+		processID:       bson.NewObjectID(),
+		authMgr:         authMgr,
+		startTime:       time.Now(),
+		log:             logging.Default().WithComponent("wire"),
+		oplog:           mongo.NewOplog(eng),
+		changeStreamMgr: mongo.NewChangeStreamManager(eng),
 	}
 }
 
@@ -137,6 +141,8 @@ func (h *Handler) Handle(msg *Message) *bson.Document {
 		response = h.handleCreate(body)
 	case "drop":
 		response = h.handleDrop(body)
+	case "collMod":
+		response = h.handleCollMod(body)
 	case "find":
 		response = h.handleFind(body)
 	case "insert":

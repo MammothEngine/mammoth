@@ -114,9 +114,32 @@ func (h *Handler) handleInsert(body *bson.Document) *bson.Document {
 		}
 	}
 
+	// Validate documents against collection schema
+	if validator, err := h.cat.GetValidator(db, collName); err == nil && validator != nil {
+		for _, doc := range docs {
+			if verr := validator.ValidateDocument(doc); verr != nil {
+				if validator.Action == mongo.ValidationError {
+					return errResponseWithCode("insert", "Document failed validation: "+verr.Error(), CodeBadValue)
+				}
+			}
+		}
+	}
+
 	err := coll.InsertMany(docs)
 	if err != nil {
 		return errResponseWithCode("insert", err.Error(), mongoErrToCode(err))
+	}
+
+	// Index maintenance: update indexes for each inserted document
+	for _, d := range docs {
+		h.indexCat.OnDocumentInsert(db, collName, d)
+		h.oplogWriteInsert(db, collName, d)
+	}
+
+	// Capped collection: enforce limits after insert
+	if capped, maxSize, maxDocs := mongo.GetCappedInfo(h.cat, db, collName); capped {
+		cc := mongo.NewCappedCollection(db, collName, h.engine, h.cat, maxSize, maxDocs)
+		cc.EnforceLimits()
 	}
 
 	doc := okDoc()
@@ -189,12 +212,26 @@ func (h *Handler) handleUpdate(body *bson.Document) *bson.Document {
 		if len(matches) > 0 {
 			for _, m := range matches {
 				matched++
-				newDoc := mongo.ApplyUpdate(m.doc, update)
+				oldDoc := m.doc
+				newDoc := mongo.ApplyUpdate(oldDoc, update)
 				// Preserve _id
-				if idVal, ok := m.doc.Get("_id"); ok {
+				if idVal, ok := oldDoc.Get("_id"); ok {
 					newDoc.Set("_id", idVal)
+
+					// Validate updated document
+					if validator, verr := h.cat.GetValidator(db, collName); verr == nil && validator != nil {
+						if vErr := validator.ValidateDocument(newDoc); vErr != nil {
+							if validator.Action == mongo.ValidationError {
+								continue // skip invalid document
+							}
+						}
+					}
+
 					if err := coll.ReplaceByKey(m.key, newDoc); err == nil {
 						modified++
+						// Index maintenance: remove old entries, add new ones
+						h.indexCat.OnDocumentUpdate(db, collName, oldDoc, newDoc)
+						h.oplogWriteUpdate(db, collName, newDoc)
 					}
 				}
 			}
@@ -216,6 +253,9 @@ func (h *Handler) handleUpdate(body *bson.Document) *bson.Document {
 				if idVal, ok := newDoc.Get("_id"); ok {
 					upsertedIDs = append(upsertedIDs, idVal)
 				}
+				// Index maintenance: add entries for upserted document
+				h.indexCat.OnDocumentInsert(db, collName, newDoc)
+				h.oplogWriteInsert(db, collName, newDoc)
 			}
 		}
 	}
@@ -244,6 +284,11 @@ func (h *Handler) handleDelete(body *bson.Document) *bson.Document {
 		return errResponseWithCode("delete", "collection name required", CodeBadValue)
 	}
 
+	// Capped collections don't allow explicit deletes
+	if mongo.IsCapped(h.cat, db, collName) {
+		return errResponseWithCode("delete", "cannot delete from capped collection", CodeBadValue)
+	}
+
 	_ = h.cat.EnsureCollection(db, collName)
 
 	deletes := getArrayFromBody(body, "deletes")
@@ -263,6 +308,7 @@ func (h *Handler) handleDelete(body *bson.Document) *bson.Document {
 		prefix := mongo.EncodeNamespacePrefix(db, collName)
 
 		var keys [][]byte
+		var deletedDocs []*bson.Document
 		h.engine.Scan(prefix, func(key, value []byte) bool {
 			doc, err := bson.Decode(value)
 			if err != nil {
@@ -270,13 +316,17 @@ func (h *Handler) handleDelete(body *bson.Document) *bson.Document {
 			}
 			if matcher.Match(doc) {
 				keys = append(keys, append([]byte{}, key...))
+				deletedDocs = append(deletedDocs, doc)
 			}
 			return true
 		})
 
-		for _, k := range keys {
+		for i, k := range keys {
 			if err := h.engine.Delete(k); err == nil {
 				deleted++
+				// Index maintenance: remove index entries for deleted document
+				h.indexCat.OnDocumentDelete(db, collName, deletedDocs[i])
+				h.oplogWriteDelete(db, collName, deletedDocs[i])
 			}
 		}
 	}

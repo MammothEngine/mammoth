@@ -65,9 +65,41 @@ func (h *Handler) handleCreate(body *bson.Document) *bson.Document {
 	if db == "" || collName == "" {
 		return errResponseWithCode("create", "collection name required", CodeBadValue)
 	}
-	if err := h.cat.EnsureCollection(db, collName); err != nil {
+
+	// Parse capped collection options
+	info := mongo.CollectionInfo{DB: db, Name: collName}
+	if capped, ok := body.Get("capped"); ok && capped.Type == bson.TypeBoolean && capped.Boolean() {
+		info.Capped = true
+		if size, ok := body.Get("size"); ok {
+			switch size.Type {
+			case bson.TypeInt32:
+				info.MaxSize = int64(size.Int32())
+			case bson.TypeInt64:
+				info.MaxSize = size.Int64()
+			}
+		}
+		if max, ok := body.Get("max"); ok {
+			switch max.Type {
+			case bson.TypeInt32:
+				info.MaxDocs = int64(max.Int32())
+			case bson.TypeInt64:
+				info.MaxDocs = max.Int64()
+			}
+		}
+	}
+
+	if err := h.cat.EnsureDatabase(db); err != nil {
 		return errResponseWithCode("create", err.Error(), mongoErrToCode(err))
 	}
+	if err := h.cat.CreateCollectionWithInfo(db, collName, info); err != nil {
+		return errResponseWithCode("create", err.Error(), mongoErrToCode(err))
+	}
+
+	// Set validator if provided
+	if v, err := mongo.ParseValidator(body); err == nil && v.Schema != nil {
+		h.cat.SetValidator(db, collName, v)
+	}
+
 	return okDoc()
 }
 
@@ -270,4 +302,26 @@ func (h *Handler) handleDropDatabase(body *bson.Document) *bson.Document {
 	doc := okDoc()
 	doc.Set("dropped", bson.VString(db))
 	return doc
+}
+
+func (h *Handler) handleCollMod(body *bson.Document) *bson.Document {
+	db := extractDB(body)
+	collName := getStringFromBody(body, "collMod")
+	if db == "" || collName == "" {
+		return errResponseWithCode("collMod", "collection name required", CodeBadValue)
+	}
+
+	// Verify collection exists
+	if _, err := h.cat.GetCollection(db, collName); err != nil {
+		return errResponseWithCode("collMod", err.Error(), mongoErrToCode(err))
+	}
+
+	// Update validator if provided
+	if v, err := mongo.ParseValidator(body); err == nil && v.Schema != nil {
+		if err := h.cat.SetValidator(db, collName, v); err != nil {
+			return errResponseWithCode("collMod", err.Error(), mongoErrToCode(err))
+		}
+	}
+
+	return okDoc()
 }

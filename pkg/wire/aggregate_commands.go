@@ -59,6 +59,16 @@ func (h *Handler) handleAggregate(body *bson.Document) *bson.Document {
 			docs = stageLimit(docs, stageVal)
 		case "$skip":
 			docs = stageSkip(docs, stageVal)
+		case "$project":
+			docs = stageProject(docs, stageVal)
+		case "$unwind":
+			docs = stageUnwind(docs, stageVal)
+		case "$lookup":
+			docs = stageLookup(docs, stageVal, h.engine, h.cat, db)
+		case "$addFields", "$set":
+			docs = stageAddFields(docs, stageVal)
+		case "$changeStream":
+			docs = h.handleChangeStream(db, collName, stageVal)
 		}
 	}
 
@@ -200,6 +210,20 @@ func stageGroup(docs []*bson.Document, stageVal bson.Value) []*bson.Document {
 				outDoc.Set(e.Key, accumulateSum(g.docs, accVal))
 			case "$count":
 				outDoc.Set(e.Key, bson.VInt32(int32(len(g.docs))))
+			case "$avg":
+				outDoc.Set(e.Key, accumulateAvg(g.docs, accVal))
+			case "$min":
+				outDoc.Set(e.Key, accumulateMin(g.docs, accVal))
+			case "$max":
+				outDoc.Set(e.Key, accumulateMax(g.docs, accVal))
+			case "$first":
+				outDoc.Set(e.Key, accumulateFirst(g.docs, accVal))
+			case "$last":
+				outDoc.Set(e.Key, accumulateLast(g.docs, accVal))
+			case "$push":
+				outDoc.Set(e.Key, accumulatePush(g.docs, accVal))
+			case "$addToSet":
+				outDoc.Set(e.Key, accumulateAddToSet(g.docs, accVal))
 			}
 		}
 

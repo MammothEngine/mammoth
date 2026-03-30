@@ -35,7 +35,7 @@ func matchDocument(filter, doc *bson.Document) bool {
 			}
 		} else {
 			// Field condition: {field: value} or {field: {$gt: 5, ...}}
-			fieldVal, found := resolveField(doc, e.Key)
+			fieldVal, found := ResolveField(doc, e.Key)
 			if !matchFieldCondition(e.Value, fieldVal, found) {
 				return false
 			}
@@ -217,8 +217,8 @@ func matchOperator(op string, opVal bson.Value, fieldVal bson.Value, fieldFound 
 	return true
 }
 
-// resolveField resolves a dot-notation path like "a.b.c" in a document.
-func resolveField(doc *bson.Document, path string) (bson.Value, bool) {
+// ResolveField resolves a dot-notation path like "a.b.c" in a document.
+func ResolveField(doc *bson.Document, path string) (bson.Value, bool) {
 	parts := strings.SplitN(path, ".", 2)
 	v, ok := doc.Get(parts[0])
 	if !ok {
@@ -229,7 +229,7 @@ func resolveField(doc *bson.Document, path string) (bson.Value, bool) {
 	}
 	// Nested: value must be a document
 	if v.Type == bson.TypeDocument {
-		return resolveField(v.DocumentValue(), parts[1])
+		return ResolveField(v.DocumentValue(), parts[1])
 	}
 	// Array index
 	if v.Type == bson.TypeArray {

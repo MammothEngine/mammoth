@@ -17,6 +17,7 @@ const (
 	catalogTypeIndex = byte(0x03)
 	catalogTypeUser  = byte(0x04)
 	catalogTypeRole  = byte(0x05)
+	catalogTypeValid = byte(0x06)
 	indexSeparator   = "\x00idx"
 )
 
@@ -172,5 +173,17 @@ func EncodeCatalogKeyRolePrefix(db string) []byte {
 	key = append(key, catalogTypeRole)
 	key = append(key, db...)
 	key = append(key, 0x00)
+	return key
+}
+
+// --- Validator catalog keys ---
+
+// EncodeCatalogKeyValidator returns a catalog key for a collection validator.
+func EncodeCatalogKeyValidator(db, coll string) []byte {
+	name := db + "." + coll
+	key := make([]byte, 0, len(catalogPrefix)+1+len(name))
+	key = append(key, catalogPrefix...)
+	key = append(key, catalogTypeValid)
+	key = append(key, name...)
 	return key
 }

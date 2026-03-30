@@ -84,7 +84,7 @@ func applyUnset(doc *bson.Document, fields *bson.Document) {
 
 func applyInc(doc *bson.Document, fields *bson.Document) {
 	for _, e := range fields.Elements() {
-		cur, found := resolveField(doc, e.Key)
+		cur, found := ResolveField(doc, e.Key)
 		var delta float64
 		switch e.Value.Type {
 		case bson.TypeInt32:
@@ -115,7 +115,7 @@ func applyInc(doc *bson.Document, fields *bson.Document) {
 
 func applyMul(doc *bson.Document, fields *bson.Document) {
 	for _, e := range fields.Elements() {
-		cur, found := resolveField(doc, e.Key)
+		cur, found := ResolveField(doc, e.Key)
 		var factor float64
 		switch e.Value.Type {
 		case bson.TypeInt32:
@@ -146,7 +146,7 @@ func applyMul(doc *bson.Document, fields *bson.Document) {
 
 func applyMin(doc *bson.Document, fields *bson.Document) {
 	for _, e := range fields.Elements() {
-		cur, found := resolveField(doc, e.Key)
+		cur, found := ResolveField(doc, e.Key)
 		if !found || bson.CompareValues(e.Value, cur) < 0 {
 			setNestedField(doc, e.Key, cloneValue(e.Value))
 		}
@@ -155,7 +155,7 @@ func applyMin(doc *bson.Document, fields *bson.Document) {
 
 func applyMax(doc *bson.Document, fields *bson.Document) {
 	for _, e := range fields.Elements() {
-		cur, found := resolveField(doc, e.Key)
+		cur, found := ResolveField(doc, e.Key)
 		if !found || bson.CompareValues(e.Value, cur) > 0 {
 			setNestedField(doc, e.Key, cloneValue(e.Value))
 		}
@@ -169,7 +169,7 @@ func applyRename(doc *bson.Document, fields *bson.Document) {
 		}
 		oldPath := e.Key
 		newPath := e.Value.String()
-		val, found := resolveField(doc, oldPath)
+		val, found := ResolveField(doc, oldPath)
 		if found {
 			unsetNestedField(doc, oldPath)
 			setNestedField(doc, newPath, val)
@@ -199,7 +199,7 @@ func applyCurrentDate(doc *bson.Document, fields *bson.Document) {
 
 func applyPush(doc *bson.Document, fields *bson.Document) {
 	for _, e := range fields.Elements() {
-		cur, found := resolveField(doc, e.Key)
+		cur, found := ResolveField(doc, e.Key)
 		var arr bson.Array
 		if found && cur.Type == bson.TypeArray {
 			arr = cur.ArrayValue()
@@ -235,7 +235,7 @@ func applyPush(doc *bson.Document, fields *bson.Document) {
 
 func applyPop(doc *bson.Document, fields *bson.Document) {
 	for _, e := range fields.Elements() {
-		cur, found := resolveField(doc, e.Key)
+		cur, found := ResolveField(doc, e.Key)
 		if !found || cur.Type != bson.TypeArray {
 			continue
 		}
@@ -256,7 +256,7 @@ func applyPop(doc *bson.Document, fields *bson.Document) {
 
 func applyAddToSet(doc *bson.Document, fields *bson.Document) {
 	for _, e := range fields.Elements() {
-		cur, found := resolveField(doc, e.Key)
+		cur, found := ResolveField(doc, e.Key)
 		var arr bson.Array
 		if found && cur.Type == bson.TypeArray {
 			arr = cur.ArrayValue()
@@ -289,7 +289,7 @@ func applyAddToSet(doc *bson.Document, fields *bson.Document) {
 
 func applyPull(doc *bson.Document, fields *bson.Document) {
 	for _, e := range fields.Elements() {
-		cur, found := resolveField(doc, e.Key)
+		cur, found := ResolveField(doc, e.Key)
 		if !found || cur.Type != bson.TypeArray {
 			continue
 		}

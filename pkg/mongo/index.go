@@ -113,7 +113,7 @@ func buildIndexKey(db, coll string, spec *IndexSpec, doc *bson.Document, id []by
 	ns := EncodeNamespacePrefix(db, coll)
 	encodedVals := make([][]byte, 0, len(spec.Key))
 	for _, ik := range spec.Key {
-		v, found := resolveField(doc, ik.Field)
+		v, found := ResolveField(doc, ik.Field)
 		var encoded []byte
 		if found {
 			encoded = encodeIndexValue(v)
@@ -196,7 +196,7 @@ func buildUniquePrefix(db, coll string, spec *IndexSpec, doc *bson.Document) []b
 	buf = append(buf, spec.Name...)
 
 	for _, ik := range spec.Key {
-		v, found := resolveField(doc, ik.Field)
+		v, found := ResolveField(doc, ik.Field)
 		var encoded []byte
 		if found {
 			encoded = encodeIndexValue(v)

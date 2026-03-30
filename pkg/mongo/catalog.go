@@ -15,8 +15,11 @@ type DatabaseInfo struct {
 
 // CollectionInfo holds metadata about a collection.
 type CollectionInfo struct {
-	DB   string `json:"db"`
-	Name string `json:"name"`
+	DB        string `json:"db"`
+	Name      string `json:"name"`
+	Capped    bool   `json:"capped,omitempty"`
+	MaxSize   int64  `json:"maxSize,omitempty"`
+	MaxDocs   int64  `json:"maxDocs,omitempty"`
 }
 
 // Catalog manages database and collection metadata, backed by the KV engine.
@@ -114,7 +117,19 @@ func (c *Catalog) GetDatabase(name string) (DatabaseInfo, error) {
 func (c *Catalog) CreateCollection(db, coll string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	return c.createCollectionLocked(db, coll, CollectionInfo{DB: db, Name: coll})
+}
 
+// CreateCollectionWithInfo creates a new collection with additional metadata.
+func (c *Catalog) CreateCollectionWithInfo(db, coll string, info CollectionInfo) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	info.DB = db
+	info.Name = coll
+	return c.createCollectionLocked(db, coll, info)
+}
+
+func (c *Catalog) createCollectionLocked(db, coll string, info CollectionInfo) error {
 	// Ensure database exists
 	dbKey := encodeCatalogKeyDB(db)
 	if _, err := c.engine.Get(dbKey); err != nil {
@@ -126,7 +141,6 @@ func (c *Catalog) CreateCollection(db, coll string) error {
 		return ErrNamespaceExists
 	}
 
-	info := CollectionInfo{DB: db, Name: coll}
 	data, err := json.Marshal(info)
 	if err != nil {
 		return err
@@ -257,4 +271,45 @@ func (c *Catalog) ListCollectionsBSON(db string) ([]*bson.Document, error) {
 		result[i] = doc
 	}
 	return result, nil
+}
+
+// --- Validator operations ---
+
+// SetValidator stores a validator for a collection.
+func (c *Catalog) SetValidator(db, coll string, v *Validator) error {
+	key := EncodeCatalogKeyValidator(db, coll)
+	data, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	return c.engine.Put(key, data)
+}
+
+// GetValidator retrieves the validator for a collection.
+func (c *Catalog) GetValidator(db, coll string) (*Validator, error) {
+	key := EncodeCatalogKeyValidator(db, coll)
+	data, err := c.engine.Get(key)
+	if err != nil {
+		return nil, err
+	}
+	var v Validator
+	if err := json.Unmarshal(data, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+// UpdateCollectionInfo updates the collection metadata.
+func (c *Catalog) UpdateCollectionInfo(db, coll string, info CollectionInfo) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	collKey := encodeCatalogKeyColl(db, coll)
+	info.DB = db
+	info.Name = coll
+	data, err := json.Marshal(info)
+	if err != nil {
+		return err
+	}
+	return c.engine.Put(collKey, data)
 }
