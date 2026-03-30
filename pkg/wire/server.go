@@ -9,17 +9,20 @@ import (
 
 // Server is a MongoDB-compatible wire protocol server.
 type Server struct {
-	listener net.Listener
-	handler  *Handler
-	addr     string
-	closed   atomic.Bool
-	wg       sync.WaitGroup
+	listener  net.Listener
+	handler   *Handler
+	addr      string
+	closed    atomic.Bool
+	wg        sync.WaitGroup
+	cfg       ServerConfig
+	connCount atomic.Int64
 }
 
 // ServerConfig configures the wire server.
 type ServerConfig struct {
-	Addr    string // bind address (default "0.0.0.0:27017")
-	Handler *Handler
+	Addr           string   // bind address (default "0.0.0.0:27017")
+	Handler        *Handler
+	MaxConnections int      // max concurrent connections (0 = unlimited)
 }
 
 // NewServer creates a new wire protocol server.
@@ -38,6 +41,7 @@ func NewServer(config ServerConfig) (*Server, error) {
 		listener: ln,
 		handler:  config.Handler,
 		addr:     ln.Addr().String(),
+		cfg:      config,
 	}, nil
 }
 
@@ -80,6 +84,16 @@ func (s *Server) Close() error {
 }
 
 func (s *Server) handleConn(conn net.Conn) {
+	// Check connection limit
+	if s.cfg.MaxConnections > 0 {
+		if s.connCount.Load() >= int64(s.cfg.MaxConnections) {
+			conn.Close()
+			return
+		}
+	}
+	s.connCount.Add(1)
+	defer s.connCount.Add(-1)
+
 	defer conn.Close()
 	remoteAddr := conn.RemoteAddr().String()
 

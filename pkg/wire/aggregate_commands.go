@@ -1,6 +1,8 @@
 package wire
 
 import (
+	"sort"
+
 	"github.com/mammothengine/mammoth/pkg/bson"
 	"github.com/mammothengine/mammoth/pkg/mongo"
 )
@@ -236,20 +238,13 @@ func stageSort(docs []*bson.Document, stageVal bson.Value) []*bson.Document {
 		return docs
 	}
 	sortSpec := stageVal.DocumentValue()
-
-	// Simple bubble sort for small datasets
-	n := len(docs)
-	for i := 0; i < n-1; i++ {
-		for j := 0; j < n-i-1; j++ {
-			if shouldSwap(docs[j], docs[j+1], sortSpec) {
-				docs[j], docs[j+1] = docs[j+1], docs[j]
-			}
-		}
-	}
+	sort.Slice(docs, func(i, j int) bool {
+		return compareDocs(docs[i], docs[j], sortSpec) < 0
+	})
 	return docs
 }
 
-func shouldSwap(a, b *bson.Document, sortSpec *bson.Document) bool {
+func compareDocs(a, b *bson.Document, sortSpec *bson.Document) int {
 	for _, e := range sortSpec.Elements() {
 		field := e.Key
 		ascending := true
@@ -264,22 +259,28 @@ func shouldSwap(a, b *bson.Document, sortSpec *bson.Document) bool {
 			continue
 		}
 		if !aOk {
-			return !ascending
+			if ascending {
+				return 1
+			}
+			return -1
 		}
 		if !bOk {
-			return ascending
+			if ascending {
+				return -1
+			}
+			return 1
 		}
 
 		cmp := bson.CompareValues(aVal, bVal)
 		if cmp == 0 {
 			continue
 		}
-		if ascending {
-			return cmp > 0
+		if !ascending {
+			cmp = -cmp
 		}
-		return cmp < 0
+		return cmp
 	}
-	return false
+	return 0
 }
 
 func stageCount(docs []*bson.Document, stageVal bson.Value) []*bson.Document {

@@ -43,16 +43,22 @@ func (ic *IndexCatalog) CreateIndex(db, coll string, spec IndexSpec) error {
 	}
 
 	// Build index entries for existing documents
+	// Collect docs first to avoid deadlock (Scan holds read lock, Put needs write lock)
 	idx := NewIndex(db, coll, &spec, ic.engine)
 	prefix := EncodeNamespacePrefix(db, coll)
+	var existingDocs []*bson.Document
 	ic.engine.Scan(prefix, func(_, docValue []byte) bool {
 		doc, err := bson.Decode(docValue)
 		if err != nil {
 			return true
 		}
-		idx.AddEntry(doc)
+		existingDocs = append(existingDocs, doc)
 		return true
 	})
+
+	for _, doc := range existingDocs {
+		idx.AddEntry(doc)
+	}
 
 	return nil
 }
@@ -150,4 +156,68 @@ func (ic *IndexCatalog) OnDocumentUpdate(db, coll string, oldDoc, newDoc *bson.D
 		}
 	}
 	return nil
+}
+
+// FindBestIndex finds the best index for a query filter.
+// Returns the index spec, the encoded prefix key for scanning, and whether an index was found.
+func (ic *IndexCatalog) FindBestIndex(db, coll string, filter *bson.Document) (spec *IndexSpec, prefixKey []byte, ok bool) {
+	indexes, err := ic.ListIndexes(db, coll)
+	if err != nil || len(indexes) == 0 {
+		return nil, nil, false
+	}
+
+	filterKeys := filter.Keys()
+	filterSet := make(map[string]bool, len(filterKeys))
+	for _, k := range filterKeys {
+		filterSet[k] = true
+	}
+
+	var bestSpec *IndexSpec
+	bestMatchCount := 0
+
+	for i := range indexes {
+		matchCount := 0
+		allPrefix := true
+		for _, ik := range indexes[i].Key {
+			if filterSet[ik.Field] {
+				matchCount++
+			} else {
+				allPrefix = false
+				break
+			}
+		}
+		if allPrefix && matchCount > bestMatchCount {
+			bestSpec = &indexes[i]
+			bestMatchCount = matchCount
+		}
+	}
+
+	if bestSpec == nil {
+		return nil, nil, false
+	}
+
+	// Build the prefix key for the index lookup
+	ns := EncodeNamespacePrefix(db, coll)
+	buf := make([]byte, 0, len(ns)+len(indexSeparator)+len(bestSpec.Name)+64)
+	buf = append(buf, ns...)
+	buf = append(buf, indexSeparator...)
+	buf = append(buf, bestSpec.Name...)
+
+	// Encode the filter values that match the index key fields
+	for _, ik := range bestSpec.Key {
+		v, found := filter.Get(ik.Field)
+		if !found {
+			break
+		}
+		encoded := encodeIndexValue(v)
+		if ik.Descending {
+			flipped := make([]byte, len(encoded))
+			copy(flipped, encoded)
+			flipForDescending(flipped)
+			encoded = flipped
+		}
+		buf = append(buf, encoded...)
+	}
+
+	return bestSpec, buf, true
 }

@@ -31,26 +31,56 @@ func (h *Handler) handleFind(body *bson.Document) *bson.Document {
 	var docs []*bson.Document
 	prefix := mongo.EncodeNamespacePrefix(db, collName)
 
-	h.engine.Scan(prefix, func(key, value []byte) bool {
-		if limit > 0 && int32(len(docs)) >= limit {
-			return false
+	// Try index-driven lookup first
+	if spec, prefixKey, ok := h.indexCat.FindBestIndex(db, collName, filter); ok && spec != nil {
+		ids := mongo.LookupByPrefix(h.engine, prefixKey)
+		for _, id := range ids {
+			docKey := mongo.EncodeDocumentKey(db, collName, id)
+			val, err := h.engine.Get(docKey)
+			if err != nil {
+				continue
+			}
+			doc, err := bson.Decode(val)
+			if err != nil {
+				continue
+			}
+			if matcher.Match(doc) {
+				if skip > 0 {
+					skip--
+					continue
+				}
+				if projection != nil && projection.Len() > 0 {
+					doc = mongo.ApplyProjection(doc, projection)
+				}
+				docs = append(docs, doc)
+				if limit > 0 && int32(len(docs)) >= limit {
+					break
+				}
+			}
 		}
-		doc, err := bson.Decode(value)
-		if err != nil {
-			return true
-		}
-		if matcher.Match(doc) {
-			if skip > 0 {
-				skip--
+	} else {
+		// Full scan fallback
+		h.engine.Scan(prefix, func(key, value []byte) bool {
+			doc, err := bson.Decode(value)
+			if err != nil {
 				return true
 			}
-			if projection != nil && projection.Len() > 0 {
-				doc = mongo.ApplyProjection(doc, projection)
+			if matcher.Match(doc) {
+				if skip > 0 {
+					skip--
+					return true
+				}
+				if projection != nil && projection.Len() > 0 {
+					doc = mongo.ApplyProjection(doc, projection)
+				}
+				docs = append(docs, doc)
+				if limit > 0 && int32(len(docs)) >= limit {
+					return false
+				}
 			}
-			docs = append(docs, doc)
-		}
-		return true
-	})
+			return true
+		})
+	}
 
 	cursor := h.cursor.Register(db+"."+collName, docs, int(batchSize))
 	firstBatch := cursor.GetBatch(int(batchSize))
@@ -106,6 +136,7 @@ func (h *Handler) handleUpdate(body *bson.Document) *bson.Document {
 
 	updates := getArrayFromBody(body, "updates")
 	var matched, modified int32
+	var upsertedIDs []bson.Value
 
 	for _, u := range updates {
 		if u.Type != bson.TypeDocument {
@@ -122,6 +153,10 @@ func (h *Handler) handleUpdate(body *bson.Document) *bson.Document {
 		multi := false
 		if v, ok := updateDoc.Get("multi"); ok && v.Type == bson.TypeBoolean {
 			multi = v.Boolean()
+		}
+		upsert := false
+		if v, ok := updateDoc.Get("upsert"); ok && v.Type == bson.TypeBoolean {
+			upsert = v.Boolean()
 		}
 
 		matcher := mongo.NewMatcher(filter)
@@ -151,14 +186,35 @@ func (h *Handler) handleUpdate(body *bson.Document) *bson.Document {
 			return true
 		})
 
-		for _, m := range matches {
-			matched++
-			newDoc := mongo.ApplyUpdate(m.doc, update)
-			// Preserve _id
-			if idVal, ok := m.doc.Get("_id"); ok {
-				newDoc.Set("_id", idVal)
-				if err := coll.ReplaceByKey(m.key, newDoc); err == nil {
-					modified++
+		if len(matches) > 0 {
+			for _, m := range matches {
+				matched++
+				newDoc := mongo.ApplyUpdate(m.doc, update)
+				// Preserve _id
+				if idVal, ok := m.doc.Get("_id"); ok {
+					newDoc.Set("_id", idVal)
+					if err := coll.ReplaceByKey(m.key, newDoc); err == nil {
+						modified++
+					}
+				}
+			}
+		} else if upsert {
+			// No match — create new document from filter + update
+			newDoc := bson.NewDocument()
+			// Copy equality fields from filter
+			for _, e := range filter.Elements() {
+				if e.Key != "_id" && e.Value.Type != bson.TypeDocument {
+					newDoc.Set(e.Key, e.Value)
+				}
+			}
+			newDoc = mongo.ApplyUpdate(newDoc, update)
+			// Generate _id if not present
+			if _, ok := newDoc.Get("_id"); !ok {
+				newDoc.Set("_id", bson.VObjectID(bson.NewObjectID()))
+			}
+			if err := coll.InsertOne(newDoc); err == nil {
+				if idVal, ok := newDoc.Get("_id"); ok {
+					upsertedIDs = append(upsertedIDs, idVal)
 				}
 			}
 		}
@@ -167,6 +223,16 @@ func (h *Handler) handleUpdate(body *bson.Document) *bson.Document {
 	doc := okDoc()
 	doc.Set("n", bson.VInt32(matched))
 	doc.Set("nModified", bson.VInt32(modified))
+	if len(upsertedIDs) > 0 {
+		var upsertedArr bson.Array
+		for i, id := range upsertedIDs {
+			entry := bson.NewDocument()
+			entry.Set("index", bson.VInt32(int32(i)))
+			entry.Set("_id", id)
+			upsertedArr = append(upsertedArr, bson.VDoc(entry))
+		}
+		doc.Set("upserted", bson.VArray(upsertedArr))
+	}
 	doc.Set("ok", bson.VDouble(1.0))
 	return doc
 }

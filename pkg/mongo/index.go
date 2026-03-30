@@ -234,3 +234,17 @@ func (idx *Index) ScanPrefix() []byte {
 	prefix = append(prefix, idx.spec.Name...)
 	return prefix
 }
+
+// LookupByPrefix scans the engine for index entries matching a prefix key
+// and returns the document _id values found.
+func LookupByPrefix(eng *engine.Engine, prefixKey []byte) [][]byte {
+	var ids [][]byte
+	_ = eng.Scan(prefixKey, func(key, _ []byte) bool {
+		if len(key) > len(prefixKey) {
+			idBytes := key[len(prefixKey):]
+			ids = append(ids, append([]byte{}, idBytes...))
+		}
+		return true
+	})
+	return ids
+}

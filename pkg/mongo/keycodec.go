@@ -39,6 +39,11 @@ func encodeDocKey(db, coll string, id []byte) []byte {
 	return key
 }
 
+// EncodeDocumentKey returns the full engine key for a document.
+func EncodeDocumentKey(db, coll string, id []byte) []byte {
+	return encodeDocKey(db, coll, id)
+}
+
 // decodeNamespaceFromKey extracts db and collection name from a document key.
 func decodeNamespaceFromKey(key []byte) (db, coll string, ok bool) {
 	pos := 0

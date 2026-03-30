@@ -323,3 +323,199 @@ func TestHandleKillCursors(t *testing.T) {
 		t.Errorf("killCursors ok = %v, want 1.0", ok.Double())
 	}
 }
+
+func TestHandle_Find_SkipLimit(t *testing.T) {
+	h, eng := setupTestHandler(t)
+	defer eng.Close()
+	defer h.Close()
+
+	// Insert 5 docs
+	for i := 0; i < 5; i++ {
+		d := bson.NewDocument()
+		d.Set("val", bson.VInt32(int32(i)))
+		h.Handle(makeInsertMsg("testdb", "nums", d))
+	}
+
+	// skip=2, limit=2 → should return 2 docs (skip first 2, take next 2)
+	body := bson.NewDocument()
+	body.Set("find", bson.VString("nums"))
+	body.Set("$db", bson.VString("testdb"))
+	body.Set("skip", bson.VInt32(2))
+	body.Set("limit", bson.VInt32(2))
+	msg := &Message{
+		Header: MsgHeader{OpCode: OpMsg},
+		Msg:    &OPMsg{Sections: []Section{{Kind: 0, Body: body}}},
+	}
+
+	resp := h.Handle(msg)
+	cursorDoc := getCursorDoc(t, resp)
+	batch := getCursorBatch(t, cursorDoc, "firstBatch")
+	if len(batch) != 2 {
+		t.Fatalf("skip=2,limit=2: expected 2 docs, got %d", len(batch))
+	}
+}
+
+func TestHandle_Update_Upsert(t *testing.T) {
+	h, eng := setupTestHandler(t)
+	defer eng.Close()
+	defer h.Close()
+
+	// Update with upsert=true on non-existent doc
+	q := bson.NewDocument()
+	q.Set("name", bson.VString("alice"))
+
+	setDoc := bson.NewDocument()
+	setDoc.Set("age", bson.VInt32(25))
+	u := bson.NewDocument()
+	u.Set("$set", bson.VDoc(setDoc))
+
+	updateEntry := bson.NewDocument()
+	updateEntry.Set("q", bson.VDoc(q))
+	updateEntry.Set("u", bson.VDoc(u))
+	updateEntry.Set("upsert", bson.VBool(true))
+
+	body := bson.NewDocument()
+	body.Set("update", bson.VString("users"))
+	body.Set("$db", bson.VString("testdb"))
+	body.Set("updates", bson.VArray(bson.A(bson.VDoc(updateEntry))))
+	msg := &Message{
+		Header: MsgHeader{OpCode: OpMsg},
+		Msg:    &OPMsg{Sections: []Section{{Kind: 0, Body: body}}},
+	}
+
+	resp := h.Handle(msg)
+	// Should have n=0 matched, nModified=0, upserted with _id
+	if n, _ := resp.Get("n"); n.Int32() != 0 {
+		t.Errorf("upsert n = %d, want 0", n.Int32())
+	}
+	if nMod, _ := resp.Get("nModified"); nMod.Int32() != 0 {
+		t.Errorf("upsert nModified = %d, want 0", nMod.Int32())
+	}
+	upsertedVal, ok := resp.Get("upserted")
+	if !ok || upsertedVal.Type != bson.TypeArray {
+		t.Fatal("expected upserted array in response")
+	}
+
+	// Verify the document was actually inserted
+	findResp := h.Handle(makeFindMsg("testdb", "users", q))
+	cursorDoc := getCursorDoc(t, findResp)
+	batch := getCursorBatch(t, cursorDoc, "firstBatch")
+	if len(batch) != 1 {
+		t.Fatalf("upserted doc not found, batch len = %d", len(batch))
+	}
+}
+
+func TestHandle_Update_Upsert_WithExisting(t *testing.T) {
+	h, eng := setupTestHandler(t)
+	defer eng.Close()
+	defer h.Close()
+
+	// Insert a doc
+	doc := bson.NewDocument()
+	doc.Set("name", bson.VString("bob"))
+	doc.Set("age", bson.VInt32(30))
+	h.Handle(makeInsertMsg("testdb", "users", doc))
+
+	// Update with upsert=true on existing doc
+	q := bson.NewDocument()
+	q.Set("name", bson.VString("bob"))
+
+	setDoc := bson.NewDocument()
+	setDoc.Set("age", bson.VInt32(31))
+	u := bson.NewDocument()
+	u.Set("$set", bson.VDoc(setDoc))
+
+	updateEntry := bson.NewDocument()
+	updateEntry.Set("q", bson.VDoc(q))
+	updateEntry.Set("u", bson.VDoc(u))
+	updateEntry.Set("upsert", bson.VBool(true))
+
+	body := bson.NewDocument()
+	body.Set("update", bson.VString("users"))
+	body.Set("$db", bson.VString("testdb"))
+	body.Set("updates", bson.VArray(bson.A(bson.VDoc(updateEntry))))
+	msg := &Message{
+		Header: MsgHeader{OpCode: OpMsg},
+		Msg:    &OPMsg{Sections: []Section{{Kind: 0, Body: body}}},
+	}
+
+	resp := h.Handle(msg)
+	// Should match existing, no upsert
+	if n, _ := resp.Get("n"); n.Int32() != 1 {
+		t.Errorf("matched n = %d, want 1", n.Int32())
+	}
+	if _, ok := resp.Get("upserted"); ok {
+		t.Error("should not have upserted field when match exists")
+	}
+}
+
+func TestHandle_Find_UsesIndex(t *testing.T) {
+	h, eng := setupTestHandler(t)
+	defer eng.Close()
+	defer h.Close()
+
+	// Insert docs
+	for i := 0; i < 5; i++ {
+		d := bson.NewDocument()
+		d.Set("status", bson.VString("active"))
+		d.Set("val", bson.VInt32(int32(i)))
+		h.Handle(makeInsertMsg("testdb", "items", d))
+	}
+	for i := 5; i < 10; i++ {
+		d := bson.NewDocument()
+		d.Set("status", bson.VString("inactive"))
+		d.Set("val", bson.VInt32(int32(i)))
+		h.Handle(makeInsertMsg("testdb", "items", d))
+	}
+
+	// Create index on status
+	idxBody := bson.NewDocument()
+	idxBody.Set("createIndexes", bson.VString("items"))
+	idxBody.Set("$db", bson.VString("testdb"))
+
+	idxKey := bson.NewDocument()
+	idxKey.Set("status", bson.VInt32(1))
+	idxSpec := bson.NewDocument()
+	idxSpec.Set("name", bson.VString("status_idx"))
+	idxSpec.Set("key", bson.VDoc(idxKey))
+	idxBody.Set("indexes", bson.VArray(bson.A(bson.VDoc(idxSpec))))
+	h.Handle(&Message{
+		Header: MsgHeader{OpCode: OpMsg},
+		Msg:    &OPMsg{Sections: []Section{{Kind: 0, Body: idxBody}}},
+	})
+
+	// Find with indexed field
+	filter := bson.NewDocument()
+	filter.Set("status", bson.VString("active"))
+	resp := h.Handle(makeFindMsg("testdb", "items", filter))
+
+	cursorDoc := getCursorDoc(t, resp)
+	batch := getCursorBatch(t, cursorDoc, "firstBatch")
+	if len(batch) != 5 {
+		t.Errorf("indexed find: expected 5 active docs, got %d", len(batch))
+	}
+}
+
+func TestHandle_Find_FallsBackToScan(t *testing.T) {
+	h, eng := setupTestHandler(t)
+	defer eng.Close()
+	defer h.Close()
+
+	// Insert docs without creating any index
+	for i := 0; i < 3; i++ {
+		d := bson.NewDocument()
+		d.Set("x", bson.VInt32(int32(i)))
+		h.Handle(makeInsertMsg("testdb", "nums", d))
+	}
+
+	// Find with filter should still work via full scan
+	filter := bson.NewDocument()
+	filter.Set("x", bson.VInt32(1))
+	resp := h.Handle(makeFindMsg("testdb", "nums", filter))
+
+	cursorDoc := getCursorDoc(t, resp)
+	batch := getCursorBatch(t, cursorDoc, "firstBatch")
+	if len(batch) != 1 {
+		t.Errorf("full scan find: expected 1 doc, got %d", len(batch))
+	}
+}

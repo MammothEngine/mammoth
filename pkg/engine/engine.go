@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/mammothengine/mammoth/pkg/engine/cache"
 	"github.com/mammothengine/mammoth/pkg/engine/compaction"
@@ -25,17 +26,18 @@ const (
 
 // Engine is the main LSM-tree storage engine.
 type Engine struct {
-	mu         sync.RWMutex
-	opts       Options
-	walLog     *wal.WAL
-	mft        *manifest.Manifest
-	compactor  *compaction.Compactor
-	blockCache cache.Cache
-	mmgr       *memtable.MemtableManager
-	readers    map[uint64]*sstable.Reader
-	seqNum     atomic.Uint64
-	nextFile   atomic.Uint64
-	closed     atomic.Bool
+	mu            sync.RWMutex
+	opts          Options
+	walLog        *wal.WAL
+	mft           *manifest.Manifest
+	compactor     *compaction.Compactor
+	blockCache    cache.Cache
+	mmgr          *memtable.MemtableManager
+	readers       map[uint64]*sstable.Reader
+	seqNum        atomic.Uint64
+	nextFile      atomic.Uint64
+	closed        atomic.Bool
+	compactionDone chan struct{}
 }
 
 // Open opens or creates a storage engine.
@@ -92,6 +94,8 @@ func Open(opts Options) (*Engine, error) {
 	}
 
 	e.compactor = compaction.NewCompactor(opts.Dir, m, e.nextFile.Load(), opts.Compression)
+	e.compactionDone = make(chan struct{})
+	go e.compactionLoop()
 	return e, nil
 }
 
@@ -191,6 +195,10 @@ func (e *Engine) Flush() error {
 func (e *Engine) Close() error {
 	if !e.closed.CompareAndSwap(false, true) {
 		return nil
+	}
+	// Stop background compaction loop
+	if e.compactionDone != nil {
+		close(e.compactionDone)
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -513,3 +521,43 @@ func (e *Engine) getAtSeqNum(key []byte, seqNum uint64) ([]byte, error) {
 
 // releaseSnapshot is a no-op for now (future: notify compaction of safe seqnums).
 func (e *Engine) releaseSnapshot(s *Snapshot) {}
+
+// compactionLoop runs periodic background compaction.
+func (e *Engine) compactionLoop() {
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-e.compactionDone:
+			return
+		case <-ticker.C:
+			e.maybeCompact()
+		}
+	}
+}
+
+// maybeCompact attempts background compaction.
+func (e *Engine) maybeCompact() {
+	if e.closed.Load() || e.compactor == nil {
+		return
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if err := e.compactor.MaybeCompact(); err == nil {
+		e.refreshReaders()
+	}
+}
+
+// MaybeCompact is the public API for triggering compaction.
+func (e *Engine) MaybeCompact() error {
+	if e.closed.Load() || e.compactor == nil {
+		return nil
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	err := e.compactor.MaybeCompact()
+	if err == nil {
+		e.refreshReaders()
+	}
+	return err
+}

@@ -70,7 +70,7 @@ func valueSize(v Value) int {
 	case TypeCodeScope:
 		cs := v.value.(CodeWithScope)
 		scope := Encode(cs.Scope)
-		return 4 + len(cs.Code) + 1 + len(scope)
+		return 4 + 4 + len(cs.Code) + 1 + len(scope)
 	case TypeInt32:
 		return 4
 	case TypeTimestamp:
@@ -165,7 +165,7 @@ func appendValue(buf []byte, v Value) []byte {
 	case TypeCodeScope:
 		cs := v.value.(CodeWithScope)
 		scopeBytes := Encode(cs.Scope)
-		totalLen := 4 + len(cs.Code) + 1 + len(scopeBytes)
+		totalLen := 4 + 4 + len(cs.Code) + 1 + len(scopeBytes)
 		buf = binary.LittleEndian.AppendUint32(buf, uint32(totalLen))
 		buf = binary.LittleEndian.AppendUint32(buf, uint32(len(cs.Code)+1))
 		buf = append(buf, cs.Code...)

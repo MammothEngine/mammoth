@@ -2,6 +2,7 @@ package bson
 
 import (
 	"bytes"
+	"fmt"
 	"testing"
 )
 
@@ -226,5 +227,115 @@ func TestConstructors(t *testing.T) {
 	arr := A(VInt32(1), VInt32(2))
 	if len(arr) != 2 {
 		t.Fatalf("expected 2, got %d", len(arr))
+	}
+}
+
+func TestDocument_Set_Overwrite(t *testing.T) {
+	doc := NewDocument()
+	doc.Set("x", VInt32(1))
+	doc.Set("x", VInt32(2))
+	if doc.Len() != 1 {
+		t.Fatalf("expected Len=1 after overwrite, got %d", doc.Len())
+	}
+	v, ok := doc.Get("x")
+	if !ok || v.Int32() != 2 {
+		t.Fatalf("expected x=2, got %v", v)
+	}
+}
+
+func TestDocument_Delete(t *testing.T) {
+	doc := NewDocument()
+	doc.Set("a", VInt32(1))
+	doc.Set("b", VInt32(2))
+	doc.Set("c", VInt32(3))
+
+	doc.Delete("b")
+	if _, ok := doc.Get("b"); ok {
+		t.Fatal("expected b to be deleted")
+	}
+	if doc.Len() != 2 {
+		t.Fatalf("expected Len=2, got %d", doc.Len())
+	}
+	// Verify remaining keys are correct
+	keys := doc.Keys()
+	if len(keys) != 2 || keys[0] != "a" || keys[1] != "c" {
+		t.Fatalf("expected keys [a,c], got %v", keys)
+	}
+	// Verify Get on remaining keys still works
+	if v, ok := doc.Get("c"); !ok || v.Int32() != 3 {
+		t.Fatal("expected c=3 after delete")
+	}
+}
+
+func TestDocument_LargeDoc(t *testing.T) {
+	doc := NewDocument()
+	const n = 1000
+	for i := 0; i < n; i++ {
+		doc.Set(fmt.Sprintf("field_%04d", i), VInt32(int32(i)))
+	}
+	if doc.Len() != n {
+		t.Fatalf("expected Len=%d, got %d", n, doc.Len())
+	}
+	for i := 0; i < n; i++ {
+		key := fmt.Sprintf("field_%04d", i)
+		v, ok := doc.Get(key)
+		if !ok || v.Int32() != int32(i) {
+			t.Fatalf("field %s: expected %d, got %v, ok=%v", key, i, v, ok)
+		}
+	}
+	// Delete half and verify
+	for i := 0; i < n/2; i++ {
+		doc.Delete(fmt.Sprintf("field_%04d", i))
+	}
+	if doc.Len() != n/2 {
+		t.Fatalf("expected Len=%d after deletes, got %d", n/2, doc.Len())
+	}
+	for i := n / 2; i < n; i++ {
+		v, ok := doc.Get(fmt.Sprintf("field_%04d", i))
+		if !ok || v.Int32() != int32(i) {
+			t.Fatalf("field_%04d: expected %d after deletes", i, i)
+		}
+	}
+}
+
+func TestDocument_EncodeDecode_Roundtrip_WithIndex(t *testing.T) {
+	doc := NewDocument()
+	doc.Set("hello", VString("world"))
+	doc.Set("num", VInt32(42))
+	doc.Set("inner", VDoc(D("x", VInt32(1))))
+
+	data := Encode(doc)
+	decoded, err := Decode(data)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	// Verify decoded doc works with map-based Get
+	if v, ok := decoded.Get("hello"); !ok || v.String() != "world" {
+		t.Fatal("hello mismatch")
+	}
+	if v, ok := decoded.Get("num"); !ok || v.Int32() != 42 {
+		t.Fatal("num mismatch")
+	}
+
+	// Re-encode and check equality
+	data2 := Encode(decoded)
+	if len(data) != len(data2) {
+		t.Fatalf("roundtrip size mismatch: %d vs %d", len(data), len(data2))
+	}
+}
+
+func TestDocument_SetGet_O1(t *testing.T) {
+	doc := NewDocument()
+	const n = 5000
+	for i := 0; i < n; i++ {
+		doc.Set(fmt.Sprintf("key_%d", i), VInt32(int32(i)))
+	}
+	// Get each key — should be fast with O(1) map lookup
+	for i := 0; i < n; i++ {
+		v, ok := doc.Get(fmt.Sprintf("key_%d", i))
+		if !ok || v.Int32() != int32(i) {
+			t.Fatalf("key_%d: expected %d", i, i)
+		}
 	}
 }

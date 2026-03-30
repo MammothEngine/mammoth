@@ -11,26 +11,37 @@ type Element struct {
 // Document represents an ordered BSON document.
 type Document struct {
 	elements []Element
+	index    map[string]int
 }
 
 // NewDocument creates an empty BSON document.
 func NewDocument() *Document {
-	return &Document{}
+	return &Document{index: make(map[string]int)}
 }
 
 // Set adds or updates a key-value pair.
 func (d *Document) Set(key string, value Value) {
-	for i := range d.elements {
-		if d.elements[i].Key == key {
+	if d.index != nil {
+		if i, ok := d.index[key]; ok {
 			d.elements[i].Value = value
 			return
 		}
 	}
 	d.elements = append(d.elements, Element{Key: key, Value: value})
+	if d.index != nil {
+		d.index[key] = len(d.elements) - 1
+	}
 }
 
 // Get returns the value for a key.
 func (d *Document) Get(key string) (Value, bool) {
+	if d.index != nil {
+		i, ok := d.index[key]
+		if !ok {
+			return Value{}, false
+		}
+		return d.elements[i].Value, true
+	}
 	for _, e := range d.elements {
 		if e.Key == key {
 			return e.Value, true
@@ -41,11 +52,24 @@ func (d *Document) Get(key string) (Value, bool) {
 
 // Delete removes a key from the document.
 func (d *Document) Delete(key string) {
-	for i := range d.elements {
-		if d.elements[i].Key == key {
-			d.elements = append(d.elements[:i], d.elements[i+1:]...)
-			return
+	if d.index == nil {
+		for i := range d.elements {
+			if d.elements[i].Key == key {
+				d.elements = append(d.elements[:i], d.elements[i+1:]...)
+				return
+			}
 		}
+		return
+	}
+	i, ok := d.index[key]
+	if !ok {
+		return
+	}
+	delete(d.index, key)
+	d.elements = append(d.elements[:i], d.elements[i+1:]...)
+	// Rebuild index for shifted elements
+	for j := i; j < len(d.elements); j++ {
+		d.index[d.elements[j].Key] = j
 	}
 }
 
@@ -70,6 +94,10 @@ func (d *Document) Len() int {
 
 // Has checks if a key exists.
 func (d *Document) Has(key string) bool {
+	if d.index != nil {
+		_, ok := d.index[key]
+		return ok
+	}
 	for _, e := range d.elements {
 		if e.Key == key {
 			return true
