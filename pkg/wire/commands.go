@@ -27,6 +27,12 @@ func (h *Handler) handleHello() *bson.Document {
 	doc.Set("logicalSessionTimeoutMinutes", bson.VInt32(30))
 	doc.Set("connectionId", bson.VInt64(int64(h.connID.Add(1))))
 
+	// SASL mechanisms
+	if h.authMgr != nil && h.authMgr.Enabled() {
+		saslMechs := bson.A(bson.VString("SCRAM-SHA-256"))
+		doc.Set("saslSupportedMechs", bson.VArray(saslMechs))
+	}
+
 	doc.Set("ok", bson.VDouble(1.0))
 	return doc
 }
@@ -39,10 +45,20 @@ func (h *Handler) handleStartSession() *bson.Document {
 	return doc
 }
 
-func (h *Handler) handleConnectionStatus() *bson.Document {
+func (h *Handler) handleConnectionStatus(connID uint64) *bson.Document {
 	doc := okDoc()
 	authInfo := bson.NewDocument()
-	authInfo.Set("authenticatedUsers", bson.VArray(bson.Array{}))
+
+	var usersArr bson.Array
+	if h.authMgr != nil && h.authMgr.Enabled() {
+		if username, authDB, ok := h.authMgr.GetUser(connID); ok {
+			userDoc := bson.NewDocument()
+			userDoc.Set("user", bson.VString(username))
+			userDoc.Set("db", bson.VString(authDB))
+			usersArr = append(usersArr, bson.VDoc(userDoc))
+		}
+	}
+	authInfo.Set("authenticatedUsers", bson.VArray(usersArr))
 	authInfo.Set("authenticatedUserRoles", bson.VArray(bson.Array{}))
 	doc.Set("authInfo", bson.VDoc(authInfo))
 	return doc

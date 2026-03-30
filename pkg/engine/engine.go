@@ -38,6 +38,11 @@ type Engine struct {
 	nextFile      atomic.Uint64
 	closed        atomic.Bool
 	compactionDone chan struct{}
+	putCount      atomic.Uint64
+	getCount      atomic.Uint64
+	deleteCount   atomic.Uint64
+	scanCount     atomic.Uint64
+	compactionCount atomic.Uint64
 }
 
 // Open opens or creates a storage engine.
@@ -112,6 +117,7 @@ func (e *Engine) Put(key, value []byte) error {
 		return fmt.Errorf("engine: wal write: %w", err)
 	}
 	e.mmgr.ActiveMemtable().Put(key, value, seq)
+	e.putCount.Add(1)
 	e.maybeFlush()
 	return nil
 }
@@ -123,6 +129,7 @@ func (e *Engine) Get(key []byte) ([]byte, error) {
 	}
 	e.mu.RLock()
 	defer e.mu.RUnlock()
+	e.getCount.Add(1)
 
 	// Check active memtable
 	if val, ok := e.mmgr.ActiveMemtable().Get(key); ok {
@@ -180,8 +187,60 @@ func (e *Engine) Delete(key []byte) error {
 		return fmt.Errorf("engine: wal write: %w", err)
 	}
 	e.mmgr.ActiveMemtable().Put(key, []byte(tombstoneMarker), seq)
+	e.deleteCount.Add(1)
 	e.maybeFlush()
 	return nil
+}
+
+// EngineStats holds engine statistics.
+type EngineStats struct {
+	MemtableCount     int
+	MemtableSizeBytes int64
+	SSTableCount      int
+	SSTableTotalBytes uint64
+	WALSegments       int
+	CompactionCount   uint64
+	SequenceNumber    uint64
+	PutCount          uint64
+	GetCount          uint64
+	DeleteCount       uint64
+	ScanCount         uint64
+}
+
+// Stats returns a snapshot of engine statistics.
+func (e *Engine) Stats() EngineStats {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	var memSize int64
+	memCount := 1
+	if mt := e.mmgr.ActiveMemtable(); mt != nil {
+		memSize = mt.ApproximateSize()
+	}
+	memCount += e.mmgr.ImmutableCount()
+
+	v := e.mft.CurrentVersion()
+	var sstCount int
+	var sstBytes uint64
+	for level := 0; level < 7; level++ {
+		for _, f := range v.Files(level) {
+			sstCount++
+			sstBytes += f.Size
+		}
+	}
+
+	return EngineStats{
+		MemtableCount:     memCount,
+		MemtableSizeBytes: memSize,
+		SSTableCount:      sstCount,
+		SSTableTotalBytes: sstBytes,
+		CompactionCount:   e.compactionCount.Load(),
+		SequenceNumber:    e.seqNum.Load(),
+		PutCount:          e.putCount.Load(),
+		GetCount:          e.getCount.Load(),
+		DeleteCount:       e.deleteCount.Load(),
+		ScanCount:         e.scanCount.Load(),
+	}
 }
 
 // Flush forces memtable to disk.
@@ -544,6 +603,7 @@ func (e *Engine) maybeCompact() {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if err := e.compactor.MaybeCompact(); err == nil {
+		e.compactionCount.Add(1)
 		e.refreshReaders()
 	}
 }

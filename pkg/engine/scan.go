@@ -18,6 +18,7 @@ func (e *Engine) Scan(prefix []byte, fn func(key, value []byte) bool) error {
 	}
 	e.mu.RLock()
 	defer e.mu.RUnlock()
+	e.scanCount.Add(1)
 
 	merged := e.collectPrefix(prefix)
 	for _, entry := range merged {

@@ -27,6 +27,7 @@ type Message struct {
 	Header     MsgHeader
 	Msg        *OPMsg
 	RemoteAddr string
+	ConnID     uint64
 }
 
 // OPMsg represents an OP_MSG message (MongoDB 3.6+).

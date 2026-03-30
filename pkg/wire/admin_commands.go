@@ -1,6 +1,8 @@
 package wire
 
 import (
+	"time"
+
 	"github.com/mammothengine/mammoth/pkg/bson"
 	"github.com/mammothengine/mammoth/pkg/mongo"
 )
@@ -216,6 +218,43 @@ func (h *Handler) handleServerStatus() *bson.Document {
 	doc := okDoc()
 	doc.Set("host", bson.VString("mammoth"))
 	doc.Set("version", bson.VString("7.0.0"))
+	doc.Set("process", bson.VString("mammoth"))
+	doc.Set("pid", bson.VInt64(int64(0)))
+	doc.Set("uptime", bson.VInt64(int64(time.Since(h.startTime).Seconds())))
+	doc.Set("uptimeMillis", bson.VInt64(time.Since(h.startTime).Milliseconds()))
+	doc.Set("localTime", bson.VDateTime(time.Now().UnixMilli()))
+
+	// Connection stats
+	var currentConns int64
+	if h.connCountFn != nil {
+		currentConns = h.connCountFn()
+	}
+	connDoc := bson.NewDocument()
+	connDoc.Set("current", bson.VInt32(int32(currentConns)))
+	connDoc.Set("available", bson.VInt32(int32(1000000)))
+	doc.Set("connections", bson.VDoc(connDoc))
+
+	// Storage engine stats
+	stats := h.engine.Stats()
+	storageDoc := bson.NewDocument()
+	storageDoc.Set("memtableCount", bson.VInt32(int32(stats.MemtableCount)))
+	storageDoc.Set("memtableSizeBytes", bson.VInt64(stats.MemtableSizeBytes))
+	storageDoc.Set("sstableCount", bson.VInt32(int32(stats.SSTableCount)))
+	storageDoc.Set("sstableTotalBytes", bson.VInt64(int64(stats.SSTableTotalBytes)))
+	storageDoc.Set("compactionCount", bson.VInt64(int64(stats.CompactionCount)))
+	storageDoc.Set("sequenceNumber", bson.VInt64(int64(stats.SequenceNumber)))
+	doc.Set("storageEngine", bson.VDoc(storageDoc))
+
+	// Op counters
+	opCounters := bson.NewDocument()
+	opCounters.Set("insert", bson.VInt64(int64(stats.PutCount)))
+	opCounters.Set("query", bson.VInt64(int64(stats.GetCount)))
+	opCounters.Set("update", bson.VInt64(0))
+	opCounters.Set("delete", bson.VInt64(int64(stats.DeleteCount)))
+	opCounters.Set("getmore", bson.VInt64(0))
+	opCounters.Set("command", bson.VInt64(0))
+	doc.Set("opcounters", bson.VDoc(opCounters))
+
 	doc.Set("ok", bson.VDouble(1.0))
 	return doc
 }

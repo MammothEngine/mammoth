@@ -15,7 +15,7 @@ func setupTestHandler(t *testing.T) (*Handler, *engine.Engine) {
 		t.Fatalf("Open: %v", err)
 	}
 	cat := mongo.NewCatalog(eng)
-	return NewHandler(eng, cat), eng
+	return NewHandler(eng, cat, nil), eng
 }
 
 func makeMessage(cmd string, pairs ...string) *Message {

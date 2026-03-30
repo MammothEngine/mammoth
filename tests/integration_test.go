@@ -20,7 +20,7 @@ func setupServer(t *testing.T) (*wire.Server, *engine.Engine) {
 		t.Fatalf("Open: %v", err)
 	}
 	cat := mongo.NewCatalog(eng)
-	handler := wire.NewHandler(eng, cat)
+	handler := wire.NewHandler(eng, cat, nil)
 
 	srv, err := wire.NewServer(wire.ServerConfig{
 		Addr:    "127.0.0.1:0",

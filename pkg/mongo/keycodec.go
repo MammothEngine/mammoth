@@ -15,6 +15,8 @@ const (
 	catalogTypeDB    = byte(0x01)
 	catalogTypeColl  = byte(0x02)
 	catalogTypeIndex = byte(0x03)
+	catalogTypeUser  = byte(0x04)
+	catalogTypeRole  = byte(0x05)
 	indexSeparator   = "\x00idx"
 )
 
@@ -115,4 +117,60 @@ func encodeCatalogKeyIndex(db, coll, indexName string) []byte {
 // isCatalogKey returns true if the key is a catalog entry.
 func isCatalogKey(key []byte) bool {
 	return len(key) > len(catalogPrefix) && string(key[:len(catalogPrefix)]) == catalogPrefix
+}
+
+// --- User catalog keys ---
+
+// EncodeCatalogKeyUser returns a catalog key for a user entry.
+// Format: \x00cat\x04{db}\x00{username}
+func EncodeCatalogKeyUser(db, username string) []byte {
+	key := make([]byte, 0, len(catalogPrefix)+1+len(db)+1+len(username))
+	key = append(key, catalogPrefix...)
+	key = append(key, catalogTypeUser)
+	key = append(key, db...)
+	key = append(key, 0x00)
+	key = append(key, username...)
+	return key
+}
+
+// EncodeCatalogKeyUserPrefix returns a prefix for scanning all users.
+func EncodeCatalogKeyUserPrefix() []byte {
+	key := make([]byte, 0, len(catalogPrefix)+1)
+	key = append(key, catalogPrefix...)
+	key = append(key, catalogTypeUser)
+	return key
+}
+
+// EncodeCatalogKeyUserDBPrefix returns a prefix for scanning users in a specific db.
+func EncodeCatalogKeyUserDBPrefix(db string) []byte {
+	key := make([]byte, 0, len(catalogPrefix)+1+len(db)+1)
+	key = append(key, catalogPrefix...)
+	key = append(key, catalogTypeUser)
+	key = append(key, db...)
+	key = append(key, 0x00)
+	return key
+}
+
+// --- Role catalog keys ---
+
+// EncodeCatalogKeyRole returns a catalog key for a role entry.
+// Format: \x00cat\x05{db}\x00{roleName}
+func EncodeCatalogKeyRole(db, roleName string) []byte {
+	key := make([]byte, 0, len(catalogPrefix)+1+len(db)+1+len(roleName))
+	key = append(key, catalogPrefix...)
+	key = append(key, catalogTypeRole)
+	key = append(key, db...)
+	key = append(key, 0x00)
+	key = append(key, roleName...)
+	return key
+}
+
+// EncodeCatalogKeyRolePrefix returns a prefix for scanning roles in a specific db.
+func EncodeCatalogKeyRolePrefix(db string) []byte {
+	key := make([]byte, 0, len(catalogPrefix)+1+len(db)+1)
+	key = append(key, catalogPrefix...)
+	key = append(key, catalogTypeRole)
+	key = append(key, db...)
+	key = append(key, 0x00)
+	return key
 }

@@ -1,12 +1,15 @@
 package wire
 
 import (
-	"log"
 	"strings"
 	"sync/atomic"
+	"time"
 
+	"github.com/mammothengine/mammoth/pkg/auth"
 	"github.com/mammothengine/mammoth/pkg/bson"
 	"github.com/mammothengine/mammoth/pkg/engine"
+	"github.com/mammothengine/mammoth/pkg/logging"
+	"github.com/mammothengine/mammoth/pkg/metrics"
 	"github.com/mammothengine/mammoth/pkg/mongo"
 )
 
@@ -14,11 +17,19 @@ import (
 const (
 	CodeInternalError     int32 = 1
 	CodeBadValue          int32 = 2
+	CodeUnauthorized      int32 = 13
 	CodeNamespaceNotFound int32 = 26
 	CodeNamespaceExists   int32 = 48
 	CodeCommandNotFound   int32 = 59
 	CodeDuplicateKey      int32 = 110
 )
+
+// HandlerMetrics holds metrics for the wire handler.
+type HandlerMetrics struct {
+	CommandDuration *metrics.Histogram
+	TotalCommands   *metrics.Counter
+	Errors          *metrics.Counter
+}
 
 // Handler dispatches wire protocol commands.
 type Handler struct {
@@ -29,18 +40,47 @@ type Handler struct {
 	reqID     atomic.Uint64
 	processID bson.ObjectID
 	connID    atomic.Uint64
+	authMgr   *auth.AuthManager
+	metrics   *HandlerMetrics
+	slowQuery *SlowQueryProfiler
+	startTime time.Time
+	log       *logging.Logger
+	connCountFn func() int64
 }
 
 // NewHandler creates a new command handler.
-func NewHandler(eng *engine.Engine, cat *mongo.Catalog) *Handler {
+func NewHandler(eng *engine.Engine, cat *mongo.Catalog, authMgr *auth.AuthManager) *Handler {
 	return &Handler{
 		engine:    eng,
 		cat:       cat,
 		indexCat:  mongo.NewIndexCatalog(eng, cat),
 		cursor:    mongo.NewCursorManager(),
 		processID: bson.NewObjectID(),
+		authMgr:   authMgr,
+		startTime: time.Now(),
+		log:       logging.Default().WithComponent("wire"),
 	}
 }
+
+// WithMetrics sets handler metrics.
+func (h *Handler) WithMetrics(m *HandlerMetrics) *Handler {
+	h.metrics = m
+	return h
+}
+
+// WithSlowQueryProfiler sets the slow query profiler.
+func (h *Handler) WithSlowQueryProfiler(p *SlowQueryProfiler) *Handler {
+	h.slowQuery = p
+	return h
+}
+
+// SetConnCountFn sets the function to get current connection count.
+func (h *Handler) SetConnCountFn(fn func() int64) {
+	h.connCountFn = fn
+}
+
+// StartTime returns when the handler was created.
+func (h *Handler) StartTime() time.Time { return h.startTime }
 
 // Close cleans up handler resources.
 func (h *Handler) Close() {
@@ -58,62 +98,115 @@ func (h *Handler) Handle(msg *Message) *bson.Document {
 		return errResponseWithCode("unknown", "empty command", CodeBadValue)
 	}
 
-	log.Printf("cmd: %s", cmd)
+	h.log.Debug("command", logging.FString("cmd", cmd), logging.FString("remote", msg.RemoteAddr))
 
+	start := time.Now()
+
+	// Auth check
+	if !publicCommands[cmd] && h.authMgr != nil && h.authMgr.Enabled() {
+		if !h.authMgr.IsAuthenticated(msg.ConnID) {
+			return errResponseWithCode(cmd, "not authenticated", CodeUnauthorized)
+		}
+
+		// RBAC check
+		action := auth.CommandToAction(cmd)
+		db := extractDB(body)
+		coll := extractCollection(body)
+		if !h.authMgr.CheckPermission(msg.ConnID, action, auth.Resource{DB: db, Collection: coll}) {
+			return errResponseWithCode(cmd, "not authorized", CodeUnauthorized)
+		}
+	}
+
+	var response *bson.Document
 	switch cmd {
 	case "hello", "isMaster", "ismaster":
-		return h.handleHello()
+		response = h.handleHello()
 	case "ping":
-		return h.handlePing()
+		response = h.handlePing()
 	case "buildInfo", "buildinfo":
-		return h.handleBuildInfo()
+		response = h.handleBuildInfo()
 	case "whatsmyuri":
-		return h.handleWhatsmyuri(msg)
+		response = h.handleWhatsmyuri(msg)
 	case "getCmdLineOpts":
-		return h.handleGetCmdLineOpts()
+		response = h.handleGetCmdLineOpts()
 	case "listDatabases":
-		return h.handleListDatabases()
+		response = h.handleListDatabases()
 	case "listCollections":
-		return h.handleListCollections(body)
+		response = h.handleListCollections(body)
 	case "create":
-		return h.handleCreate(body)
+		response = h.handleCreate(body)
 	case "drop":
-		return h.handleDrop(body)
+		response = h.handleDrop(body)
 	case "find":
-		return h.handleFind(body)
+		response = h.handleFind(body)
 	case "insert":
-		return h.handleInsert(body)
+		response = h.handleInsert(body)
 	case "update":
-		return h.handleUpdate(body)
+		response = h.handleUpdate(body)
 	case "delete":
-		return h.handleDelete(body)
+		response = h.handleDelete(body)
 	case "getMore":
-		return h.handleGetMore(body)
+		response = h.handleGetMore(body)
 	case "killCursors":
-		return h.handleKillCursors(body)
+		response = h.handleKillCursors(body)
 	case "createIndexes":
-		return h.handleCreateIndexes(body)
+		response = h.handleCreateIndexes(body)
 	case "dropIndexes":
-		return h.handleDropIndexes(body)
+		response = h.handleDropIndexes(body)
 	case "listIndexes":
-		return h.handleListIndexes(body)
+		response = h.handleListIndexes(body)
 	case "serverStatus":
-		return h.handleServerStatus()
+		response = h.handleServerStatus()
 	case "startSession":
-		return h.handleStartSession()
+		response = h.handleStartSession()
 	case "endSessions":
-		return okDoc()
+		response = okDoc()
 	case "connectionStatus":
-		return h.handleConnectionStatus()
+		response = h.handleConnectionStatus(msg.ConnID)
 	case "dropDatabase":
-		return h.handleDropDatabase(body)
+		response = h.handleDropDatabase(body)
 	case "aggregate":
-		return h.handleAggregate(body)
+		response = h.handleAggregate(body)
 	case "count":
-		return h.handleCount(body)
+		response = h.handleCount(body)
+	case "saslStart":
+		response = h.handleSaslStart(body, msg.ConnID)
+	case "saslContinue":
+		response = h.handleSaslContinue(body, msg.ConnID)
+	case "createUser":
+		response = h.handleCreateUser(body)
+	case "dropUser":
+		response = h.handleDropUser(body)
+	case "usersInfo":
+		response = h.handleUsersInfo(body)
+	case "createRole":
+		response = h.handleCreateRole(body)
+	case "updateRole":
+		response = h.handleUpdateRole(body)
+	case "dropRole":
+		response = h.handleDropRole(body)
+	case "rolesInfo":
+		response = h.handleRolesInfo(body)
 	default:
-		return errResponseWithCode(cmd, "unknown command", CodeCommandNotFound)
+		response = errResponseWithCode(cmd, "unknown command", CodeCommandNotFound)
 	}
+
+	// Record metrics
+	duration := time.Since(start)
+	if h.metrics != nil {
+		h.metrics.TotalCommands.Inc()
+		h.metrics.CommandDuration.Observe(duration.Seconds())
+		if response != nil {
+			if ok, _ := response.Get("ok"); ok.Type == bson.TypeDouble && ok.Double() == 0 {
+				h.metrics.Errors.Inc()
+			}
+		}
+	}
+	if h.slowQuery != nil {
+		h.slowQuery.Record(cmd, extractDB(body), duration)
+	}
+
+	return response
 }
 
 // --- Helper methods ---
@@ -139,6 +232,8 @@ func codeName(code int32) string {
 		return "InternalError"
 	case CodeBadValue:
 		return "BadValue"
+	case CodeUnauthorized:
+		return "Unauthorized"
 	case CodeNamespaceNotFound:
 		return "NamespaceNotFound"
 	case CodeNamespaceExists:
