@@ -1,0 +1,30 @@
+# Binaries
+mammoth
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test
+*.test
+*.out
+*.prof
+*.cpuprofile
+*.memprofile
+coverage.txt
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data directories (engine test artifacts)
+testdata/
+data/
