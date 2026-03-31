@@ -161,8 +161,8 @@ func TestRouter_RouteForRead(t *testing.T) {
 	chunk := &Chunk{
 		ID:    "chunk_1",
 		Ns:    "testdb.users",
-		Min:   ChunkRange{Min: int64(0), Max: int64(100000)},
-		Max:   ChunkRange{Min: int64(0), Max: int64(100000)},
+		Min:   int64(0),
+		Max:   int64(100000),
 		Shard: "shard1",
 	}
 	cfg.AddChunk(chunk)
@@ -361,6 +361,281 @@ func TestBalancerState(t *testing.T) {
 	}
 }
 
+func TestConfig_RemoveShard(t *testing.T) {
+	cfg := NewConfig()
+
+	s1 := &Shard{ID: "shard1", Host: "localhost:27018"}
+	cfg.AddShard(s1)
+
+	// Remove existing shard
+	if err := cfg.RemoveShard("shard1"); err != nil {
+		t.Fatalf("RemoveShard failed: %v", err)
+	}
+
+	// Should not find it anymore
+	if _, ok := cfg.GetShard("shard1"); ok {
+		t.Error("Shard should be removed")
+	}
+
+	// Removing non-existent should error
+	if err := cfg.RemoveShard("shard1"); err == nil {
+		t.Error("Expected error for non-existent shard")
+	}
+}
+
+func TestConfig_GetShard(t *testing.T) {
+	cfg := NewConfig()
+
+	s1 := &Shard{ID: "shard1", Host: "localhost:27018"}
+	cfg.AddShard(s1)
+
+	// Get existing
+	s, ok := cfg.GetShard("shard1")
+	if !ok {
+		t.Error("Should find shard1")
+	}
+	if s.Host != "localhost:27018" {
+		t.Error("Wrong host")
+	}
+
+	// Get non-existent
+	_, ok = cfg.GetShard("nonexistent")
+	if ok {
+		t.Error("Should not find non-existent shard")
+	}
+}
+
+func TestConfig_UpdateChunkShard(t *testing.T) {
+	cfg := NewConfig()
+
+	chunk := &Chunk{
+		ID:    "chunk1",
+		Ns:    "testdb.users",
+		Min:   int64(0),
+		Max:   int64(100),
+		Shard: "shard1",
+	}
+	cfg.AddChunk(chunk)
+
+	// Update chunk to new shard
+	if err := cfg.UpdateChunkShard("chunk1", "shard2"); err != nil {
+		t.Fatalf("UpdateChunkShard failed: %v", err)
+	}
+
+	// Verify update
+	chunks := cfg.GetChunksForNamespace("testdb.users")
+	if len(chunks) != 1 || chunks[0].Shard != "shard2" {
+		t.Error("Chunk shard not updated")
+	}
+
+	// Update non-existent should error
+	if err := cfg.UpdateChunkShard("nonexistent", "shard3"); err == nil {
+		t.Error("Expected error for non-existent chunk")
+	}
+}
+
+func TestRouter_GetEngine(t *testing.T) {
+	_, router, cleanup := setupShardTest(t)
+	defer cleanup()
+
+	// Get existing engine
+	eng, err := router.GetEngine("shard1")
+	if err != nil {
+		t.Fatalf("GetEngine failed: %v", err)
+	}
+	if eng == nil {
+		t.Error("Engine should not be nil")
+	}
+
+	// Get non-existent shard
+	_, err = router.GetEngine("nonexistent")
+	if err == nil {
+		t.Error("Expected error for non-existent shard")
+	}
+}
+
+func TestExtractShardKey_MissingField(t *testing.T) {
+	doc := bson.NewDocument()
+	doc.Set("name", bson.VString("test"))
+
+	sk := &ShardKey{Fields: []string{"user_id"}, Ns: "testdb.users"}
+	_, err := ExtractShardKey(doc, sk)
+	if err == nil {
+		t.Error("Expected error for missing shard key field")
+	}
+}
+
+func TestExtractShardKey_EmptyKey(t *testing.T) {
+	doc := bson.NewDocument()
+	sk := &ShardKey{Fields: []string{}, Ns: "testdb.users"}
+	_, err := ExtractShardKey(doc, sk)
+	if err == nil {
+		t.Error("Expected error for empty shard key")
+	}
+}
+
+func TestRouter_RouteForWrite_NotSharded(t *testing.T) {
+	_, router, cleanup := setupShardTest(t)
+	defer cleanup()
+
+	doc := bson.NewDocument()
+	doc.Set("name", bson.VString("test"))
+
+	// Should route to first shard when not sharded
+	shardID, err := router.RouteForWrite("testdb.unsharded", doc)
+	if err != nil {
+		t.Fatalf("RouteForWrite failed: %v", err)
+	}
+	if shardID != "shard1" {
+		t.Errorf("Expected shard1 for unsharded collection, got %s", shardID)
+	}
+}
+
+func TestRouter_RouteForWrite_MissingShardKey(t *testing.T) {
+	cfg, router, cleanup := setupShardTest(t)
+	defer cleanup()
+
+	// Configure sharding but document missing key
+	cfg.SetShardKey(&ShardKey{
+		Fields: []string{"user_id"},
+		Ns:     "testdb.users",
+	})
+
+	doc := bson.NewDocument()
+	doc.Set("name", bson.VString("test"))
+
+	_, err := router.RouteForWrite("testdb.users", doc)
+	if err == nil {
+		t.Error("Expected error for missing shard key")
+	}
+}
+
+func TestRouter_RouteForRange_NotSharded(t *testing.T) {
+	_, router, cleanup := setupShardTest(t)
+	defer cleanup()
+
+	shards, err := router.RouteForRange("testdb.unsharded", int64(0), int64(100))
+	if err != nil {
+		t.Fatalf("RouteForRange failed: %v", err)
+	}
+	if len(shards) != 3 {
+		t.Errorf("Expected 3 shards for unsharded range query, got %d", len(shards))
+	}
+}
+
+func TestRouter_ConnectShard(t *testing.T) {
+	cfg := NewConfig()
+	router := NewRouter(cfg)
+
+	dir := t.TempDir()
+	eng, err := engine.Open(engine.DefaultOptions(dir))
+	if err != nil {
+		t.Fatalf("Failed to create engine: %v", err)
+	}
+	defer eng.Close()
+
+	// Connect a new shard
+	err = router.ConnectShard("new_shard", eng)
+	if err != nil {
+		t.Fatalf("ConnectShard failed: %v", err)
+	}
+
+	// Verify we can get the engine
+	retrievedEng, err := router.GetEngine("new_shard")
+	if err != nil {
+		t.Fatalf("GetEngine failed: %v", err)
+	}
+	if retrievedEng != eng {
+		t.Error("Retrieved engine doesn't match")
+	}
+}
+
+func TestChunk_ContainsKey(t *testing.T) {
+	chunk := &Chunk{
+		ID:    "chunk1",
+		Min:   int64(0),
+		Max:   int64(100),
+		Shard: "shard1",
+	}
+
+	if !chunk.ContainsKey(int64(50)) {
+		t.Error("50 should be in chunk")
+	}
+	if !chunk.ContainsKey(int64(0)) {
+		t.Error("0 should be in chunk (inclusive)")
+	}
+	if chunk.ContainsKey(int64(100)) {
+		t.Error("100 should NOT be in chunk (exclusive)")
+	}
+	if chunk.ContainsKey(int64(-1)) {
+		t.Error("-1 should NOT be in chunk")
+	}
+}
+
+func TestChunkRange(t *testing.T) {
+	cr := ChunkRange{
+		Min: int64(10),
+		Max: int64(20),
+	}
+
+	if !cr.Contains(int64(15)) {
+		t.Error("15 should be in range")
+	}
+	if !cr.Contains(int64(10)) {
+		t.Error("10 should be in range (inclusive min)")
+	}
+	if cr.Contains(int64(20)) {
+		t.Error("20 should NOT be in range (exclusive max)")
+	}
+	if cr.Contains(int64(5)) {
+		t.Error("5 should NOT be in range")
+	}
+}
+
+func TestHashShardKey_Distribution(t *testing.T) {
+	// Test that hash distributes values
+	hashes := make(map[uint64]int)
+	for i := 0; i < 1000; i++ {
+		h := hashShardKey(int64(i))
+		hashes[h]++
+	}
+
+	// Should have many different hash values
+	if len(hashes) < 900 {
+		t.Logf("Warning: Hash distribution may be poor: %d unique hashes for 1000 values", len(hashes))
+	}
+}
+
+func TestBsonValueToComparable(t *testing.T) {
+	// Test string
+	v := bson.VString("test")
+	result := bsonValueToComparable(v)
+	if result != "test" {
+		t.Errorf("Expected 'test', got %v", result)
+	}
+
+	// Test int32
+	v = bson.VInt32(42)
+	result = bsonValueToComparable(v)
+	if result != int64(42) {
+		t.Errorf("Expected int64(42), got %v", result)
+	}
+
+	// Test int64
+	v = bson.VInt64(100)
+	result = bsonValueToComparable(v)
+	if result != int64(100) {
+		t.Errorf("Expected int64(100), got %v", result)
+	}
+
+	// Test double
+	v = bson.VDouble(3.14)
+	result = bsonValueToComparable(v)
+	if result != float64(3.14) {
+		t.Errorf("Expected float64(3.14), got %v", result)
+	}
+}
+
 func TestRouter_HashedSharding(t *testing.T) {
 	cfg, router, cleanup := setupShardTest(t)
 	defer cleanup()
@@ -371,6 +646,16 @@ func TestRouter_HashedSharding(t *testing.T) {
 		Hashed: true,
 		Ns:     "testdb.users",
 	})
+
+	// Create a chunk covering entire hash range
+	chunk := &Chunk{
+		ID:    "chunk_hash",
+		Ns:    "testdb.users",
+		Min:   uint64(0),
+		Max:   uint64(^uint64(0)), // Full range
+		Shard: "shard1",
+	}
+	cfg.AddChunk(chunk)
 
 	doc := bson.NewDocument()
 	doc.Set("email", bson.VString("user@example.com"))

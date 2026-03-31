@@ -34,14 +34,19 @@ func (cr ChunkRange) Contains(val interface{}) bool {
 
 // Chunk represents a data partition assigned to a shard.
 type Chunk struct {
-	ID       string     `json:"_id"`
-	Ns       string     `json:"ns"`       // namespace: db.collection
-	Min      ChunkRange `json:"min"`      // inclusive lower bound
-	Max      ChunkRange `json:"max"`      // exclusive upper bound
-	Shard    ShardID    `json:"shard"`    // assigned shard
-	Jumbo    bool       `json:"jumbo"`    // too large to split
-	Size     int64      `json:"size"`     // estimated size in bytes
-	DocCount int64      `json:"docCount"` // estimated document count
+	ID       string      `json:"_id"`
+	Ns       string      `json:"ns"`       // namespace: db.collection
+	Min      interface{} `json:"min"`      // inclusive lower bound
+	Max      interface{} `json:"max"`      // exclusive upper bound
+	Shard    ShardID     `json:"shard"`    // assigned shard
+	Jumbo    bool        `json:"jumbo"`    // too large to split
+	Size     int64       `json:"size"`     // estimated size in bytes
+	DocCount int64       `json:"docCount"` // estimated document count
+}
+
+// ContainsKey returns true if the given key falls within this chunk's range.
+func (c *Chunk) ContainsKey(key interface{}) bool {
+	return compareShardKey(key, c.Min) >= 0 && compareShardKey(key, c.Max) < 0
 }
 
 // Shard represents a single shard in the cluster.
@@ -154,7 +159,7 @@ func (c *Config) FindChunkForKey(ns string, keyVal interface{}) *Chunk {
 	defer c.mu.RUnlock()
 
 	for _, chunk := range c.chunks[ns] {
-		if chunk.Min.Contains(keyVal) {
+		if chunk.ContainsKey(keyVal) {
 			return chunk
 		}
 	}

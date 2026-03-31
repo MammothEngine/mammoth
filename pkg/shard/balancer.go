@@ -207,7 +207,7 @@ func (b *Balancer) migrateChunk(chunk *Chunk, targetShard ShardID) error {
 			keyVal = hashShardKey(keyVal)
 		}
 
-		if chunk.Min.Contains(keyVal) {
+		if chunk.ContainsKey(keyVal) {
 			// Copy to target
 			dstEng.Put(key, value)
 			// Queue for deletion from source
@@ -258,7 +258,7 @@ func (b *Balancer) SplitChunk(chunk *Chunk) error {
 		ID:    chunk.ID + "_L",
 		Ns:    chunk.Ns,
 		Min:   chunk.Min,
-		Max:   ChunkRange{Min: chunk.Min.Min, Max: median},
+		Max:   median,
 		Shard: chunk.Shard,
 		Size:  chunk.Size / 2,
 	}
@@ -266,7 +266,7 @@ func (b *Balancer) SplitChunk(chunk *Chunk) error {
 	rightChunk := &Chunk{
 		ID:    chunk.ID + "_R",
 		Ns:    chunk.Ns,
-		Min:   ChunkRange{Min: median, Max: chunk.Max.Max},
+		Min:   median,
 		Max:   chunk.Max,
 		Shard: chunk.Shard,
 		Size:  chunk.Size / 2,
@@ -313,7 +313,7 @@ func (b *Balancer) findMedianKey(chunk *Chunk) (interface{}, error) {
 			keyVal = hashShardKey(keyVal)
 		}
 
-		if chunk.Min.Contains(keyVal) {
+		if chunk.ContainsKey(keyVal) {
 			values = append(values, keyVal)
 		}
 		return true
@@ -375,7 +375,7 @@ func (b *Balancer) CheckChunkSize(chunk *Chunk) error {
 			keyVal = hashShardKey(keyVal)
 		}
 
-		if chunk.Min.Contains(keyVal) {
+		if chunk.ContainsKey(keyVal) {
 			size += int64(len(value))
 			count++
 		}

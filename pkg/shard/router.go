@@ -181,10 +181,10 @@ func (r *Router) assignToLeastLoadedShard(ns string) (ShardID, error) {
 }
 
 // rangesOverlap checks if two ranges overlap.
-func rangesOverlap(qMin, qMax interface{}, cMin, cMax ChunkRange) bool {
-	// Query range [qMin, qMax) overlaps with chunk [cMin.Min, cMin.Max)
+func rangesOverlap(qMin, qMax interface{}, cMin, cMax interface{}) bool {
+	// Query range [qMin, qMax) overlaps with chunk [cMin, cMax)
 	// Simplified: check if ranges intersect
-	return compareShardKey(qMax, cMin.Min) > 0 && compareShardKey(qMin, cMin.Max) < 0
+	return compareShardKey(qMax, cMin) > 0 && compareShardKey(qMin, cMax) < 0
 }
 
 // hashShardKey computes a hash for the given shard key value.
