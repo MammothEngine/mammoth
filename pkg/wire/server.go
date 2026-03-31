@@ -171,6 +171,9 @@ func (s *Server) handleConn(conn net.Conn) {
 		if s.handler.authMgr != nil {
 			s.handler.authMgr.RemoveSession(cid)
 		}
+		if s.handler.sessionMgr != nil {
+			s.handler.sessionMgr.Remove(cid)
+		}
 	}()
 
 	for !s.closed.Load() {

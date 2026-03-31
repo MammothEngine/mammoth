@@ -51,6 +51,7 @@ type Handler struct {
 	oplog            *mongo.Oplog
 	changeStreamMgr  *mongo.ChangeStreamManager
 	opTracker        *opTracker
+	sessionMgr       *SessionManager
 }
 
 // NewHandler creates a new command handler.
@@ -67,10 +68,60 @@ func NewHandler(eng *engine.Engine, cat *mongo.Catalog, authMgr *auth.AuthManage
 		oplog:           mongo.NewOplog(eng),
 		changeStreamMgr: mongo.NewChangeStreamManager(eng),
 		opTracker:       newOpTracker(),
+		sessionMgr:      NewSessionManager(),
 	}
 }
 
-// WithMetrics sets handler metrics.
+// txWrapper wraps a Transaction to match engineOps interface.
+type txWrapper struct {
+	tx *engine.Transaction
+}
+
+func (w *txWrapper) Get(key []byte) ([]byte, error) {
+	return w.tx.Get(key)
+}
+
+func (w *txWrapper) Put(key, value []byte) error {
+	w.tx.Put(key, value)
+	return nil
+}
+
+func (w *txWrapper) Delete(key []byte) {
+	w.tx.Delete(key)
+}
+
+// engineWrapper wraps an Engine to match engineOps interface.
+type engineWrapper struct {
+	eng *engine.Engine
+}
+
+func (w *engineWrapper) Get(key []byte) ([]byte, error) {
+	return w.eng.Get(key)
+}
+
+func (w *engineWrapper) Put(key, value []byte) error {
+	return w.eng.Put(key, value)
+}
+
+func (w *engineWrapper) Delete(key []byte) {
+	w.eng.Delete(key)
+}
+
+// getEngine returns the engine or active transaction for the connection.
+func (h *Handler) getEngine(connID uint64) engineOps {
+	if h.sessionMgr.IsInTransaction(connID) {
+		return &txWrapper{tx: h.sessionMgr.GetTransaction(connID)}
+	}
+	return &engineWrapper{eng: h.engine}
+}
+
+// engineOps is the interface for engine operations (Engine or Transaction).
+type engineOps interface {
+	Get(key []byte) ([]byte, error)
+	Put(key, value []byte) error
+	Delete(key []byte)
+}
+
 func (h *Handler) WithMetrics(m *HandlerMetrics) *Handler {
 	h.metrics = m
 	return h
@@ -175,6 +226,12 @@ func (h *Handler) Handle(msg *Message) *bson.Document {
 		response = h.handleServerStatus()
 	case "startSession":
 		response = h.handleStartSession()
+	case "startTransaction":
+		response = h.handleStartTransaction(body, msg.ConnID)
+	case "commitTransaction":
+		response = h.handleCommitTransaction(msg.ConnID)
+	case "abortTransaction":
+		response = h.handleAbortTransaction(msg.ConnID)
 	case "endSessions":
 		response = okDoc()
 	case "connectionStatus":
