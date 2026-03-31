@@ -362,8 +362,6 @@ func TestRealReplicationScenario(t *testing.T) {
 		status := n.rs.Status()
 		t.Logf("Node %d: state=%s term=%d leader=%d",
 			i+1, status.State, status.Term, status.LeaderID)
-	}
-
 	// Test 5: Node Failover - stop leader and verify new leader election
 	t.Run("NodeFailover", func(t *testing.T) {
 		// Find current leader
