@@ -17,10 +17,10 @@ func (e *Engine) Scan(prefix []byte, fn func(key, value []byte) bool) error {
 		return errEngineClosed
 	}
 	e.mu.RLock()
-	defer e.mu.RUnlock()
-	e.scanCount.Add(1)
-
 	merged := e.collectPrefix(prefix)
+	e.mu.RUnlock()
+
+	e.scanCount.Add(1)
 	for _, entry := range merged {
 		if !fn(entry.key, entry.value) {
 			break
@@ -180,14 +180,14 @@ func (e *Engine) snapshotScan(prefix []byte, seqNum uint64, fn func(key, value [
 		return errEngineClosed
 	}
 	e.mu.RLock()
-	defer e.mu.RUnlock()
-
 	// For now, use the same collectPrefix approach.
 	// True MVCC would require per-entry seqNum tracking in the memtable and SSTables,
 	// which would need significant changes to the storage format.
 	// The current implementation provides a best-effort snapshot by using the
 	// current visible state, which is sufficient for single-writer scenarios.
 	merged := e.collectPrefix(prefix)
+	e.mu.RUnlock()
+
 	for _, entry := range merged {
 		if !fn(entry.key, entry.value) {
 			break

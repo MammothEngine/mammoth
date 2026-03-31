@@ -72,6 +72,11 @@ func NewHandler(eng *engine.Engine, cat *mongo.Catalog, authMgr *auth.AuthManage
 	}
 }
 
+// SetSessionManager sets the session manager for the handler.
+func (h *Handler) SetSessionManager(sm *SessionManager) {
+	h.sessionMgr = sm
+}
+
 // txWrapper wraps a Transaction to match engineOps interface.
 type txWrapper struct {
 	tx *engine.Transaction
