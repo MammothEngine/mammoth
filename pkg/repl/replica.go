@@ -98,6 +98,11 @@ func (rs *ReplicaSet) Term() uint64 {
 	return rs.raft.Term()
 }
 
+// ID returns this node's ID.
+func (rs *ReplicaSet) ID() uint64 {
+	return rs.id
+}
+
 // Propose submits a command to the cluster.
 func (rs *ReplicaSet) Propose(cmd Command) (uint64, uint64, error) {
 	data, err := json.Marshal(cmd)

@@ -644,3 +644,35 @@ func (a *engineAdapter) NewBatch() LogBatch {
 type batchAdapter struct {
 	BatchInterface
 }
+
+// StepDown steps down as leader.
+func (r *Raft) StepDown() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.state != StateLeader {
+		return ErrNotLeader
+	}
+
+	r.becomeFollower()
+	return nil
+}
+
+// Freeze prevents this node from becoming primary for the given duration.
+func (r *Raft) Freeze(duration time.Duration) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// Set election timeout to far future
+	originalTimeout := r.electionTimeout
+	r.electionTimeout = duration
+	r.resetElectionTimer()
+
+	// Restore after duration
+	go func() {
+		time.Sleep(duration)
+		r.mu.Lock()
+		r.electionTimeout = originalTimeout
+		r.mu.Unlock()
+	}()
+}
