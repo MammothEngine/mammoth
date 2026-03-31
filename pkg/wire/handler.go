@@ -5,6 +5,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/mammothengine/mammoth/pkg/audit"
 	"github.com/mammothengine/mammoth/pkg/auth"
 	"github.com/mammothengine/mammoth/pkg/bson"
 	"github.com/mammothengine/mammoth/pkg/engine"
@@ -41,6 +42,7 @@ type Handler struct {
 	processID        bson.ObjectID
 	connID           atomic.Uint64
 	authMgr          *auth.AuthManager
+	audit            *audit.AuditLogger
 	metrics          *HandlerMetrics
 	slowQuery        *SlowQueryProfiler
 	startTime        time.Time
@@ -77,6 +79,12 @@ func (h *Handler) WithMetrics(m *HandlerMetrics) *Handler {
 // WithSlowQueryProfiler sets the slow query profiler.
 func (h *Handler) WithSlowQueryProfiler(p *SlowQueryProfiler) *Handler {
 	h.slowQuery = p
+	return h
+}
+
+// WithAudit sets the audit logger for the handler.
+func (h *Handler) WithAudit(a *audit.AuditLogger) *Handler {
+	h.audit = a
 	return h
 }
 
@@ -226,6 +234,18 @@ func (h *Handler) Handle(msg *Message) *bson.Document {
 	}
 	if h.slowQuery != nil {
 		h.slowQuery.Record(cmd, extractDB(body), duration)
+	}
+
+	// Audit logging for write operations
+	if h.audit != nil {
+		db := extractDB(body)
+		coll := extractCollection(body)
+		switch cmd {
+		case "insert", "update", "delete", "create", "drop", "createIndexes", "dropIndexes",
+			"dropDatabase", "createUser", "dropUser", "createRole", "dropRole", "updateRole",
+			"findAndModify":
+			h.audit.LogOperation(cmd, db, coll, duration)
+		}
 	}
 
 	return response

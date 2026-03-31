@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mammoth Engine Admin</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <nav id="sidebar">
+    <div class="brand">
+      <h1>Mammoth</h1>
+      <small>Admin Console</small>
+    </div>
+    <ul id="nav">
+      <li><a href="#/" class="active">Dashboard</a></li>
+      <li><a href="#/databases">Databases</a></li>
+      <li><a href="#/indexes">Indexes</a></li>
+      <li><a href="#/users">Users</a></li>
+      <li><a href="#/stats">Statistics</a></li>
+    </ul>
+    <div class="footer">
+      <small id="version"></small>
+    </div>
+  </nav>
+  <main id="content"></main>
+  <div id="modal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 id="modal-title"></h3>
+        <button class="close-btn" onclick="closeModal()">&times;</button>
+      </div>
+      <div id="modal-body"></div>
+    </div>
+  </div>
+  <script src="/app.js"></script>
+  <script src="/dashboard.js"></script>
+  <script src="/databases.js"></script>
+  <script src="/documents.js"></script>
+  <script src="/indexes.js"></script>
+  <script src="/users.js"></script>
+  <script src="/stats.js"></script>
+</body>
+</html>

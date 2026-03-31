@@ -6,7 +6,7 @@ import (
 
 func TestGetCompressorReturnsCorrectType(t *testing.T) {
 	// Types that are currently implemented.
-	implemented := []CompressionType{CompressionNone, CompressionSnappy}
+	implemented := []CompressionType{CompressionNone, CompressionSnappy, CompressionLZ4, CompressionZstd}
 	for _, want := range implemented {
 		c := GetCompressor(want)
 		if c == nil {
@@ -16,14 +16,6 @@ func TestGetCompressorReturnsCorrectType(t *testing.T) {
 		got := c.Type()
 		if got != want {
 			t.Errorf("GetCompressor(%v).Type() = %v, want %v", want, got, want)
-		}
-	}
-
-	// Unimplemented types should fall back to NoneCompressor.
-	for _, ct := range []CompressionType{CompressionLZ4, CompressionZstd} {
-		c := GetCompressor(ct)
-		if c.Type() != CompressionNone {
-			t.Errorf("GetCompressor(%v).Type() = %v, expected fallback to CompressionNone", ct, c.Type())
 		}
 	}
 }

@@ -120,10 +120,34 @@ func (ic *IndexCatalog) OnDocumentInsert(db, coll string, doc *bson.Document) er
 	if err != nil {
 		return err
 	}
-	for _, spec := range indexes {
-		idx := NewIndex(db, coll, &spec, ic.engine)
-		if err := idx.AddEntry(doc); err != nil {
-			return err
+	for i := range indexes {
+		spec := &indexes[i]
+		switch {
+		case isWildcardIndex(spec):
+			wi := NewWildcardIndex(db, coll, spec, ic.engine)
+			if err := wi.AddEntry(doc); err != nil {
+				return err
+			}
+		case isHashIndex(spec):
+			hi := NewHashIndex(db, coll, spec, ic.engine)
+			if err := hi.AddEntry(doc); err != nil {
+				return err
+			}
+		case isTextIndex(spec):
+			ti := NewTextIndex(db, coll, spec, ic.engine)
+			if err := ti.AddEntry(doc); err != nil {
+				return err
+			}
+		case isGeoIndex(spec):
+			gi := NewGeoIndex(db, coll, spec, ic.engine)
+			if err := gi.AddEntry(doc); err != nil {
+				return err
+			}
+		default:
+			idx := NewIndex(db, coll, spec, ic.engine)
+			if err := idx.AddEntry(doc); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -135,9 +159,25 @@ func (ic *IndexCatalog) OnDocumentDelete(db, coll string, doc *bson.Document) er
 	if err != nil {
 		return err
 	}
-	for _, spec := range indexes {
-		idx := NewIndex(db, coll, &spec, ic.engine)
-		idx.RemoveEntry(doc)
+	for i := range indexes {
+		spec := &indexes[i]
+		switch {
+		case isWildcardIndex(spec):
+			wi := NewWildcardIndex(db, coll, spec, ic.engine)
+			_ = wi.RemoveEntry(doc)
+		case isHashIndex(spec):
+			hi := NewHashIndex(db, coll, spec, ic.engine)
+			_ = hi.RemoveEntry(doc)
+		case isTextIndex(spec):
+			ti := NewTextIndex(db, coll, spec, ic.engine)
+			_ = ti.RemoveEntry(doc)
+		case isGeoIndex(spec):
+			gi := NewGeoIndex(db, coll, spec, ic.engine)
+			_ = gi.RemoveEntry(doc)
+		default:
+			idx := NewIndex(db, coll, spec, ic.engine)
+			idx.RemoveEntry(doc)
+		}
 	}
 	return nil
 }
@@ -148,14 +188,72 @@ func (ic *IndexCatalog) OnDocumentUpdate(db, coll string, oldDoc, newDoc *bson.D
 	if err != nil {
 		return err
 	}
-	for _, spec := range indexes {
-		idx := NewIndex(db, coll, &spec, ic.engine)
-		idx.RemoveEntry(oldDoc)
-		if err := idx.AddEntry(newDoc); err != nil {
-			return err
+	for i := range indexes {
+		spec := &indexes[i]
+		switch {
+		case isWildcardIndex(spec):
+			wi := NewWildcardIndex(db, coll, spec, ic.engine)
+			_ = wi.RemoveEntry(oldDoc)
+			if err := wi.AddEntry(newDoc); err != nil {
+				return err
+			}
+		case isHashIndex(spec):
+			hi := NewHashIndex(db, coll, spec, ic.engine)
+			_ = hi.RemoveEntry(oldDoc)
+			if err := hi.AddEntry(newDoc); err != nil {
+				return err
+			}
+		case isTextIndex(spec):
+			ti := NewTextIndex(db, coll, spec, ic.engine)
+			_ = ti.RemoveEntry(oldDoc)
+			if err := ti.AddEntry(newDoc); err != nil {
+				return err
+			}
+		case isGeoIndex(spec):
+			gi := NewGeoIndex(db, coll, spec, ic.engine)
+			_ = gi.RemoveEntry(oldDoc)
+			if err := gi.AddEntry(newDoc); err != nil {
+				return err
+			}
+		default:
+			idx := NewIndex(db, coll, spec, ic.engine)
+			idx.RemoveEntry(oldDoc)
+			if err := idx.AddEntry(newDoc); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
+}
+
+// isHashIndex returns true if the index spec has any hashed key component.
+func isHashIndex(spec *IndexSpec) bool {
+	for _, k := range spec.Key {
+		if k.Hashed {
+			return true
+		}
+	}
+	return false
+}
+
+// isWildcardIndex returns true if the index spec is a wildcard ($**) index.
+func isWildcardIndex(spec *IndexSpec) bool {
+	for _, k := range spec.Key {
+		if k.Field == "$**" {
+			return true
+		}
+	}
+	return false
+}
+
+// isTextIndex returns true if the index is a full-text index.
+func isTextIndex(spec *IndexSpec) bool {
+	return spec.IndexType == "text"
+}
+
+// isGeoIndex returns true if the index is a geospatial (2dsphere) index.
+func isGeoIndex(spec *IndexSpec) bool {
+	return spec.IndexType == "2dsphere"
 }
 
 // IndexBounds describes lower and upper bounds for a range predicate on an indexed field.

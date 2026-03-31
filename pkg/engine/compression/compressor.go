@@ -28,6 +28,10 @@ func GetCompressor(t CompressionType) Compressor {
 		return NoneCompressor{}
 	case CompressionSnappy:
 		return SnappyCompressor{}
+	case CompressionLZ4:
+		return LZ4Compressor{}
+	case CompressionZstd:
+		return ZstdCompressor{}
 	default:
 		return NoneCompressor{}
 	}

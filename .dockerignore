@@ -1,0 +1,8 @@
+*.exe
+data/
+testdata/
+.git/
+.claude/
+dist/
+*.bak
+docker-compose.yml

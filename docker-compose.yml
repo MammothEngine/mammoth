@@ -1,0 +1,43 @@
+version: "3.8"
+
+services:
+  mammoth-1:
+    build: .
+    container_name: mammoth-1
+    ports:
+      - "27017:27017"
+      - "8081:8081"
+      - "9100:9100"
+    volumes:
+      - mammoth-1-data:/data
+    command: ["serve", "--data-dir", "/data", "--bind", "0.0.0.0"]
+    restart: unless-stopped
+
+  mammoth-2:
+    build: .
+    container_name: mammoth-2
+    ports:
+      - "27018:27017"
+      - "8082:8081"
+      - "9101:9100"
+    volumes:
+      - mammoth-2-data:/data
+    command: ["serve", "--data-dir", "/data", "--bind", "0.0.0.0"]
+    restart: unless-stopped
+
+  mammoth-3:
+    build: .
+    container_name: mammoth-3
+    ports:
+      - "27019:27017"
+      - "8083:8081"
+      - "9102:9100"
+    volumes:
+      - mammoth-3-data:/data
+    command: ["serve", "--data-dir", "/data", "--bind", "0.0.0.0"]
+    restart: unless-stopped
+
+volumes:
+  mammoth-1-data:
+  mammoth-2-data:
+  mammoth-3-data:

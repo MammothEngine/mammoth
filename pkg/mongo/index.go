@@ -16,12 +16,15 @@ type IndexSpec struct {
 	Sparse                  bool           `json:"sparse,omitempty"`
 	ExpireAfterSeconds      int32          `json:"expireAfterSeconds,omitempty"`
 	PartialFilterExpression *bson.Document `json:"partialFilterExpression,omitempty"`
+	IndexType               string         `json:"indexType,omitempty"` // "text", "2dsphere", "" for regular
+	DefaultLanguage         string         `json:"defaultLanguage,omitempty"`
 }
 
 // IndexKey describes one component of a compound index key.
 type IndexKey struct {
 	Field      string `json:"field"`
 	Descending bool   `json:"descending"`
+	Hashed     bool   `json:"hashed,omitempty"`
 }
 
 // Type-preserving encoding tags for index keys.
