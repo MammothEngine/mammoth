@@ -293,54 +293,76 @@ func TestRealReplicationScenario(t *testing.T) {
 
 	t.Log("Created 3-node replica set")
 
-	// Test 1: Check initial state
-	t.Run("InitialState", func(t *testing.T) {
-		for i, n := range nodes {
-			state := n.rs.State()
-			t.Logf("Node %d state: %v", i+1, state)
-		}
-	})
-
-	// Test 2: Write data on what might become leader
-	t.Run("WriteData", func(t *testing.T) {
-		// Try to write to each node until one accepts
-		for i, n := range nodes {
-			if !n.rs.IsLeader() {
-				continue
+	// Wait for leader election
+	var leader *testNode
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, n := range nodes {
+			if n.rs.IsLeader() {
+				leader = n
+				t.Logf("Node %d elected as leader (term=%d)", n.id, n.rs.Term())
+				break
 			}
+		}
+		if leader != nil {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if leader == nil {
+		t.Fatal("No leader elected within timeout")
+	}
 
-			n.cat.EnsureCollection("testdb", "repldata")
-			coll := mongo.NewCollection("testdb", "repldata", n.eng, n.cat)
+	// Check initial state
+	t.Log("=== Initial State ===")
+	for i, n := range nodes {
+		state := n.rs.State()
+		t.Logf("Node %d state: %v", i+1, state)
+	}
 
-			for j := 0; j < 10; j++ {
-				doc := bson.NewDocument()
-				doc.Set("_id", bson.VInt64(int64(j)))
-				doc.Set("node", bson.VInt32(int32(i+1)))
-				doc.Set("value", bson.VString(fmt.Sprintf("data_%d", j)))
-				doc.Set("timestamp", bson.VInt64(time.Now().Unix()))
+	// Write data through leader using Raft
+	t.Log("=== Write Data via Raft ===")
+	for j := 0; j < 10; j++ {
+		doc := bson.NewDocument()
+		doc.Set("_id", bson.VInt64(int64(j)))
+		doc.Set("node", bson.VInt32(int32(leader.id)))
+		doc.Set("value", bson.VString(fmt.Sprintf("data_%d", j)))
+		doc.Set("timestamp", bson.VInt64(time.Now().Unix()))
 
-				if err := coll.InsertOne(doc); err != nil {
-					t.Logf("Node %d insert error: %v", i+1, err)
-				}
+		data := bson.Encode(doc)
+		id := fmt.Sprintf("testdb:repldata:%d", j)
+		_, _, err := leader.rs.Put([]byte(id), data)
+		if err != nil {
+			t.Logf("Insert %d error: %v", j, err)
+		}
+	}
+	t.Logf("Node %d (leader) wrote 10 documents via Raft", leader.id)
+
+	// Wait for replication
+	time.Sleep(500 * time.Millisecond)
+	t.Logf("Leader commit index: %d", leader.rs.RaftNode().CommitIndex())
+
+	// Verify data replication
+	t.Log("=== Verify Replication ===")
+	for i, n := range nodes {
+		count := 0
+		n.eng.Scan(nil, func(key, value []byte) bool {
+			// Count only raft log keys (not metadata)
+			if len(key) > 0 {
+				count++
 			}
+			return true
+		})
+		t.Logf("Node %d has %d raft log entries", i+1, count)
+	}
 
-			t.Logf("Node %d (leader) wrote 10 documents", i+1)
-			return
-		}
-
-		t.Log("No leader found for write (may not have elected yet)")
-	})
-
-	// Test 3: Check replication status
-	t.Run("CheckStatus", func(t *testing.T) {
-		time.Sleep(500 * time.Millisecond)
-
-		for i, n := range nodes {
-			status := n.rs.Status()
-			t.Logf("Node %d: state=%s term=%d leader=%d",
-				i+1, status.State, status.Term, status.LeaderID)
-		}
-	})
+	// Check replication status
+	t.Log("=== Final Status ===")
+	for i, n := range nodes {
+		status := n.rs.Status()
+		t.Logf("Node %d: state=%s term=%d leader=%d",
+			i+1, status.State, status.Term, status.LeaderID)
+	}
 }
 
 // TestRealTransactionWithWireProtocol tests transactions through wire protocol
@@ -561,7 +583,41 @@ func (ea *engineAdapter) Scan(prefix []byte, fn func(key, value []byte) bool) er
 }
 
 func (ea *engineAdapter) NewBatch() repl.BatchInterface {
-	return nil // Not used in tests
+	return &batchAdapter{eng: ea.eng}
+}
+
+type batchAdapter struct {
+	eng  *engine.Engine
+	puts map[string][]byte
+	dels map[string]bool
+}
+
+func (b *batchAdapter) Put(key, value []byte) {
+	if b.puts == nil {
+		b.puts = make(map[string][]byte)
+	}
+	b.puts[string(key)] = value
+}
+
+func (b *batchAdapter) Delete(key []byte) {
+	if b.dels == nil {
+		b.dels = make(map[string]bool)
+	}
+	b.dels[string(key)] = true
+}
+
+func (b *batchAdapter) Commit() error {
+	for k, v := range b.puts {
+		if err := b.eng.Put([]byte(k), v); err != nil {
+			return err
+		}
+	}
+	for k := range b.dels {
+		if err := b.eng.Delete([]byte(k)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func sendWireCommand(t *testing.T, conn net.Conn, cmdDoc *bson.Document) *bson.Document {
