@@ -756,3 +756,144 @@ chaosLoop:
 	}
 	t.Logf("Commit index distribution: %v", commits)
 }
+
+// BenchmarkPut benchmarks single put operations
+func BenchmarkPut(b *testing.B) {
+	dir := b.TempDir()
+	eng, err := engine.Open(engine.DefaultOptions(dir))
+	if err != nil {
+		b.Fatalf("Failed to open engine: %v", err)
+	}
+	defer eng.Close()
+
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		i := 0
+		for pb.Next() {
+			key := fmt.Sprintf("bench_key_%d", i)
+			value := fmt.Sprintf("bench_value_%d", i)
+			eng.Put([]byte(key), []byte(value))
+			i++
+		}
+	})
+}
+
+// BenchmarkGet benchmarks single get operations
+func BenchmarkGet(b *testing.B) {
+	dir := b.TempDir()
+	eng, err := engine.Open(engine.DefaultOptions(dir))
+	if err != nil {
+		b.Fatalf("Failed to open engine: %v", err)
+	}
+	defer eng.Close()
+
+	// Pre-populate
+	for i := 0; i < 10000; i++ {
+		key := fmt.Sprintf("bench_key_%d", i)
+		value := fmt.Sprintf("bench_value_%d", i)
+		eng.Put([]byte(key), []byte(value))
+	}
+
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		i := 0
+		for pb.Next() {
+			key := fmt.Sprintf("bench_key_%d", i%10000)
+			eng.Get([]byte(key))
+			i++
+		}
+	})
+}
+
+// BenchmarkRaftPropose benchmarks Raft consensus operations
+func BenchmarkRaftPropose(b *testing.B) {
+	sharedTransport := repl.NewMemTransport()
+
+	// Create 3 nodes
+	nodes := make([]*repl.ReplicaSet, 3)
+	for i := 0; i < 3; i++ {
+		dir := b.TempDir()
+		eng, _ := engine.Open(engine.DefaultOptions(dir))
+		cfg := &repl.ClusterConfig{
+			Nodes: []repl.NodeConfig{
+				{ID: 1, Address: "localhost:2001", Voter: true},
+				{ID: 2, Address: "localhost:2002", Voter: true},
+				{ID: 3, Address: "localhost:2003", Voter: true},
+			},
+		}
+		rs := repl.NewReplicaSet(repl.ReplicaSetConfig{
+			ID:        uint64(i + 1),
+			Config:    cfg,
+			Engine:    &engineAdapter{eng},
+			Transport: sharedTransport,
+		})
+		rs.Start()
+		nodes[i] = rs
+	}
+
+	// Register nodes
+	for i, rs := range nodes {
+		sharedTransport.Register(uint64(i+1), rs.RaftNode())
+	}
+
+	// Wait for leader
+	time.Sleep(300 * time.Millisecond)
+
+	// Find leader
+	var leader *repl.ReplicaSet
+	for _, rs := range nodes {
+		if rs.IsLeader() {
+			leader = rs
+			break
+		}
+	}
+	if leader == nil {
+		b.Fatal("No leader elected")
+	}
+
+	defer func() {
+		for _, rs := range nodes {
+			rs.Stop()
+		}
+	}()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		key := fmt.Sprintf("raft_key_%d", i)
+		value := fmt.Sprintf("raft_value_%d", i)
+		leader.Put([]byte(key), []byte(value))
+	}
+}
+
+// BenchmarkBsonEncode benchmarks BSON encoding
+func BenchmarkBsonEncode(b *testing.B) {
+	doc := bson.NewDocument()
+	doc.Set("_id", bson.VString("test123"))
+	doc.Set("name", bson.VString("John Doe"))
+	doc.Set("age", bson.VInt32(30))
+	doc.Set("active", bson.VBool(true))
+	doc.Set("balance", bson.VDouble(1234.56))
+	doc.Set("tags", bson.VArray(bson.Array{
+		bson.VString("premium"),
+		bson.VString("verified"),
+	}))
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		bson.Encode(doc)
+	}
+}
+
+// BenchmarkBsonDecode benchmarks BSON decoding
+func BenchmarkBsonDecode(b *testing.B) {
+	doc := bson.NewDocument()
+	doc.Set("_id", bson.VString("test123"))
+	doc.Set("name", bson.VString("John Doe"))
+	doc.Set("age", bson.VInt32(30))
+	data := bson.Encode(doc)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		bson.Decode(data)
+	}
+}
