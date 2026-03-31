@@ -229,3 +229,91 @@ func (t *memTransport) SendRPC(to uint64, req *RPCRequest) (*RPCResponse, error)
 	}
 	return node.HandleRPC(req)
 }
+
+// partitionTransport simulates network partitions for testing.
+type partitionTransport struct {
+	mu        sync.Mutex
+	nodes     map[uint64]*Raft
+	partition map[uint64]int // nodeID -> partition group (0 = no partition)
+	blocked   map[string]bool // "from->to" pairs that are blocked
+}
+
+// NewPartitionTransport creates a transport that can simulate network partitions.
+func NewPartitionTransport() *partitionTransport {
+	return &partitionTransport{
+		nodes:     make(map[uint64]*Raft),
+		partition: make(map[uint64]int),
+		blocked:   make(map[string]bool),
+	}
+}
+
+func (t *partitionTransport) Register(id uint64, r *Raft) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.nodes[id] = r
+}
+
+func (t *partitionTransport) SendRPC(to uint64, req *RPCRequest) (*RPCResponse, error) {
+	t.mu.Lock()
+	fromGroup := t.partition[req.From]
+	toGroup := t.partition[to]
+	node, ok := t.nodes[to]
+	blocked := t.blocked[fmt.Sprintf("%d->%d", req.From, to)]
+	t.mu.Unlock()
+
+	if !ok {
+		return nil, fmt.Errorf("node %d not found", to)
+	}
+
+	// Check if partitioned
+	if fromGroup != 0 && toGroup != 0 && fromGroup != toGroup {
+		return nil, fmt.Errorf("network partition: cannot reach node %d from node %d", to, req.From)
+	}
+
+	if blocked {
+		return nil, fmt.Errorf("connection blocked: %d -> %d", req.From, to)
+	}
+
+	return node.HandleRPC(req)
+}
+
+// SetPartition creates a network partition between two groups of nodes.
+// Nodes in different groups cannot communicate with each other.
+func (t *partitionTransport) SetPartition(groupA, groupB []uint64) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	// Clear existing partition
+	t.partition = make(map[uint64]int)
+
+	// Assign group 1 to groupA
+	for _, id := range groupA {
+		t.partition[id] = 1
+	}
+
+	// Assign group 2 to groupB
+	for _, id := range groupB {
+		t.partition[id] = 2
+	}
+}
+
+// HealPartition removes all network partitions.
+func (t *partitionTransport) HealPartition() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.partition = make(map[uint64]int)
+}
+
+// BlockConnection blocks RPC from one node to another.
+func (t *partitionTransport) BlockConnection(from, to uint64) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.blocked[fmt.Sprintf("%d->%d", from, to)] = true
+}
+
+// UnblockConnection unblocks RPC from one node to another.
+func (t *partitionTransport) UnblockConnection(from, to uint64) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	delete(t.blocked, fmt.Sprintf("%d->%d", from, to))
+}

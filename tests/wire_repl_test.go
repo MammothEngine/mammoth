@@ -443,6 +443,154 @@ func TestRealReplicationScenario(t *testing.T) {
 	})
 }
 
+// TestNetworkPartition tests split-brain scenario and recovery
+func TestNetworkPartition(t *testing.T) {
+	// Create shared transport with partition control
+	sharedTransport := repl.NewPartitionTransport()
+
+	// Create 5 nodes (odd number for better quorum handling)
+	nodes := make([]*testNode, 5)
+	for i := 0; i < 5; i++ {
+		dir := getTempDir(t)
+		eng, err := engine.Open(engine.DefaultOptions(dir))
+		if err != nil {
+			t.Fatalf("Failed to open engine for node %d: %v", i, err)
+		}
+
+		cfg := &repl.ClusterConfig{
+			Nodes: []repl.NodeConfig{
+				{ID: 1, Address: "localhost:2001", Voter: true},
+				{ID: 2, Address: "localhost:2002", Voter: true},
+				{ID: 3, Address: "localhost:2003", Voter: true},
+				{ID: 4, Address: "localhost:2004", Voter: true},
+				{ID: 5, Address: "localhost:2005", Voter: true},
+			},
+		}
+
+		rs := repl.NewReplicaSet(repl.ReplicaSetConfig{
+			ID:        uint64(i + 1),
+			Config:    cfg,
+			Engine:    &engineAdapter{eng},
+			Transport: sharedTransport,
+		})
+		rs.Start()
+
+		nodes[i] = &testNode{
+			id:  uint64(i + 1),
+			rs:  rs,
+			eng: eng,
+			cat: mongo.NewCatalog(eng),
+		}
+	}
+
+	// Register all nodes
+	for _, n := range nodes {
+		sharedTransport.Register(n.id, n.rs.RaftNode())
+	}
+
+	// Cleanup
+	defer func() {
+		for _, n := range nodes {
+			n.rs.Stop()
+			n.eng.Close()
+		}
+	}()
+
+	t.Log("Created 5-node cluster")
+
+	// Phase 1: Wait for leader election
+	time.Sleep(500 * time.Millisecond)
+	var leader *testNode
+	for _, n := range nodes {
+		if n.rs.IsLeader() {
+			leader = n
+			break
+		}
+	}
+	if leader == nil {
+		t.Fatal("No leader elected")
+	}
+	t.Logf("Initial leader: Node %d", leader.id)
+
+	// Phase 2: Create partition (isolate 2 nodes)
+	// Partition A: nodes 0,1,2 (majority - 3 nodes)
+	// Partition B: nodes 3,4 (minority - 2 nodes)
+	t.Log("Creating network partition...")
+	sharedTransport.SetPartition([]uint64{1, 2, 3}, []uint64{4, 5})
+
+	// Wait for partition to take effect (give time for election timeouts)
+	time.Sleep(1200 * time.Millisecond)
+
+	// Phase 3: Verify majority partition elects new leader
+	t.Log("Checking majority partition...")
+	var newLeader *testNode
+	for _, n := range nodes[:3] { // Only check majority partition
+		if n.rs.IsLeader() {
+			newLeader = n
+			break
+		}
+	}
+	if newLeader == nil {
+		t.Log("Note: Leader may still be in majority partition, checking...")
+		for _, n := range nodes[:3] {
+			status := n.rs.Status()
+			t.Logf("Node %d: state=%s term=%d", n.id, status.State, status.Term)
+		}
+	} else {
+		t.Logf("Majority partition has leader: Node %d", newLeader.id)
+	}
+
+	// Phase 4: Verify minority partition cannot elect leader
+	t.Log("Checking minority partition...")
+	minorityHasLeader := false
+	for _, n := range nodes[3:] { // Check minority partition
+		if n.rs.IsLeader() {
+			minorityHasLeader = true
+			break
+		}
+	}
+	if minorityHasLeader {
+		t.Error("Minority partition should NOT have a leader (split-brain detected)")
+	} else {
+		t.Log("Minority partition correctly has no leader")
+	}
+
+	// Phase 5: Write to majority partition
+	if newLeader != nil {
+		_, _, err := newLeader.rs.Put([]byte("partition_test"), []byte("value"))
+		if err != nil {
+			t.Logf("Write during partition: %v", err)
+		} else {
+			t.Log("Successfully wrote to majority partition during partition")
+		}
+	}
+
+	// Phase 6: Heal partition
+	t.Log("Healing network partition...")
+	sharedTransport.HealPartition()
+	time.Sleep(600 * time.Millisecond)
+
+	// Phase 7: Verify cluster recovers
+	leaderCount := 0
+	for _, n := range nodes {
+		if n.rs.IsLeader() {
+			leaderCount++
+		}
+	}
+	if leaderCount != 1 {
+		t.Errorf("Expected 1 leader after healing, got %d", leaderCount)
+	} else {
+		t.Log("Cluster recovered with single leader")
+	}
+
+	// Final status
+	t.Log("=== Final Cluster Status ===")
+	for _, n := range nodes {
+		status := n.rs.Status()
+		t.Logf("Node %d: state=%s term=%d", n.id, status.State, status.Term)
+	}
+}
+
 func TestRealTransactionWithWireProtocol(t *testing.T) {
 	dir := getTempDir(t)
 	eng, err := engine.Open(engine.DefaultOptions(dir))
