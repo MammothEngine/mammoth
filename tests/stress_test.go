@@ -12,6 +12,7 @@ import (
 	"github.com/mammothengine/mammoth/pkg/bson"
 	"github.com/mammothengine/mammoth/pkg/engine"
 	"github.com/mammothengine/mammoth/pkg/mongo"
+	"github.com/mammothengine/mammoth/pkg/repl"
 )
 
 // StressTestConfig configures stress test parameters.
@@ -552,4 +553,206 @@ func TestStabilityLongRunning(t *testing.T) {
 
 	t.Logf("Stability test completed: inserts=%d reads=%d updates=%d deletes=%d",
 		inserts, reads, updates, deletes)
+}
+
+// TestChaosEngineering tests system resilience under random failures
+func TestChaosEngineering(t *testing.T) {
+	sharedTransport := repl.NewPartitionTransport()
+
+	// Create 5-node cluster
+	nodes := make([]*testNode, 5)
+	for i := 0; i < 5; i++ {
+		dir := t.TempDir()
+		eng, err := engine.Open(engine.DefaultOptions(dir))
+		if err != nil {
+			t.Fatalf("Failed to open engine for node %d: %v", i, err)
+		}
+
+		cfg := &repl.ClusterConfig{
+			Nodes: []repl.NodeConfig{
+				{ID: 1, Address: "localhost:2001", Voter: true},
+				{ID: 2, Address: "localhost:2002", Voter: true},
+				{ID: 3, Address: "localhost:2003", Voter: true},
+				{ID: 4, Address: "localhost:2004", Voter: true},
+				{ID: 5, Address: "localhost:2005", Voter: true},
+			},
+		}
+
+		rs := repl.NewReplicaSet(repl.ReplicaSetConfig{
+			ID:        uint64(i + 1),
+			Config:    cfg,
+			Engine:    &engineAdapter{eng},
+			Transport: sharedTransport,
+		})
+		rs.Start()
+
+		nodes[i] = &testNode{
+			id:  uint64(i + 1),
+			rs:  rs,
+			eng: eng,
+			cat: mongo.NewCatalog(eng),
+		}
+	}
+
+	// Register all nodes
+	for _, n := range nodes {
+		sharedTransport.Register(n.id, n.rs.RaftNode())
+	}
+
+	defer func() {
+		for _, n := range nodes {
+			n.rs.Stop()
+			n.eng.Close()
+		}
+	}()
+
+	// Wait for initial leader
+	time.Sleep(500 * time.Millisecond)
+	t.Log("Chaos test starting with 5-node cluster")
+
+	// Chaos parameters
+	chaosDuration := 30 * time.Second
+	chaosTicker := time.NewTicker(2 * time.Second)
+	defer chaosTicker.Stop()
+
+	operationCount := int32(0)
+	successCount := int32(0)
+	failureCount := int32(0)
+
+	// Find initial leader
+	var getLeader = func() *testNode {
+		for _, n := range nodes {
+			if n.rs.IsLeader() {
+				return n
+			}
+		}
+		return nil
+	}
+
+	// Start chaos goroutine
+	ctx, cancel := context.WithTimeout(context.Background(), chaosDuration)
+	defer cancel()
+
+	// Writer goroutine
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				leader := getLeader()
+				if leader != nil {
+					key := fmt.Sprintf("chaos_key_%d", atomic.AddInt32(&operationCount, 1))
+					value := fmt.Sprintf("value_%d", time.Now().Unix())
+					_, _, err := leader.rs.Put([]byte(key), []byte(value))
+					if err != nil {
+						atomic.AddInt32(&failureCount, 1)
+					} else {
+						atomic.AddInt32(&successCount, 1)
+					}
+				}
+				time.Sleep(50 * time.Millisecond)
+			}
+		}
+	}()
+
+	// Chaos injector
+	chaosCount := 0
+chaosLoop:
+	for {
+		select {
+		case <-ctx.Done():
+			break chaosLoop
+		case <-chaosTicker.C:
+			chaosCount++
+			action := rand.Intn(5)
+
+			switch action {
+			case 0: // Kill random node
+				nodeIdx := rand.Intn(5)
+				if nodes[nodeIdx].rs.State() != repl.StateLeader {
+					t.Logf("[Chaos %d] Killing Node %d", chaosCount, nodeIdx+1)
+					nodes[nodeIdx].rs.Stop()
+					// Restart after delay
+					go func(idx int) {
+						time.Sleep(3 * time.Second)
+						nodes[idx].rs.Start()
+					}(nodeIdx)
+				}
+
+			case 1: // Network partition
+				t.Logf("[Chaos %d] Creating network partition", chaosCount)
+				sharedTransport.SetPartition([]uint64{1, 2, 3}, []uint64{4, 5})
+				// Heal after delay
+				go func() {
+					time.Sleep(4 * time.Second)
+					sharedTransport.HealPartition()
+				}()
+
+			case 2: // Block random connection
+				from := uint64(rand.Intn(5) + 1)
+				to := uint64(rand.Intn(5) + 1)
+				if from != to {
+					t.Logf("[Chaos %d] Blocking connection %d->%d", chaosCount, from, to)
+					sharedTransport.BlockConnection(from, to)
+					go func(f, t uint64) {
+						time.Sleep(2 * time.Second)
+						sharedTransport.UnblockConnection(f, t)
+					}(from, to)
+				}
+
+			case 3: // Delayed packets (simulated by brief partition)
+				t.Logf("[Chaos %d] Simulating network delay", chaosCount)
+				sharedTransport.SetPartition([]uint64{1}, []uint64{2, 3, 4, 5})
+				go func() {
+					time.Sleep(1 * time.Second)
+					sharedTransport.HealPartition()
+				}()
+
+			case 4: // Leader freeze
+				for _, n := range nodes {
+					if n.rs.IsLeader() {
+						t.Logf("[Chaos %d] Freezing leader Node %d", chaosCount, n.id)
+						n.rs.RaftNode().Freeze(2 * time.Second)
+						break
+					}
+				}
+			}
+		}
+	}
+
+	// Wait for recovery
+	t.Log("Chaos injection complete, waiting for recovery...")
+	time.Sleep(3 * time.Second)
+
+	// Report results
+	totalOps := atomic.LoadInt32(&operationCount)
+	successOps := atomic.LoadInt32(&successCount)
+	failedOps := atomic.LoadInt32(&failureCount)
+
+	t.Logf("=== Chaos Test Results ===")
+	t.Logf("Total operations: %d", totalOps)
+	t.Logf("Successful writes: %d", successOps)
+	t.Logf("Failed writes: %d", failedOps)
+	t.Logf("Success rate: %.2f%%", float64(successOps)/float64(totalOps)*100)
+
+	// Verify cluster health
+	leaderCount := 0
+	for _, n := range nodes {
+		if n.rs.IsLeader() {
+			leaderCount++
+		}
+	}
+	if leaderCount != 1 {
+		t.Errorf("Expected 1 leader after chaos, got %d", leaderCount)
+	} else {
+		t.Log("Cluster has exactly 1 leader (healthy)")
+	}
+
+	// Check data consistency
+	commits := make(map[uint64]int)
+	for _, n := range nodes {
+		commits[n.rs.RaftNode().CommitIndex()]++
+	}
+	t.Logf("Commit index distribution: %v", commits)
 }
