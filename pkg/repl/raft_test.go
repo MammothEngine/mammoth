@@ -108,7 +108,7 @@ func testClusterConfig(n int) *ClusterConfig {
 
 func createCluster(t *testing.T, n int, electionTimeout time.Duration) ([]*Raft, *memTransport) {
 	t.Helper()
-	transport := newMemTransport()
+	transport := NewMemTransport()
 	cfg := testClusterConfig(n)
 	nodes := make([]*Raft, n)
 
@@ -280,7 +280,7 @@ func TestRaftAppendEntriesRejectLowerTerm(t *testing.T) {
 		ID:     1,
 		Config: cfg,
 		Engine: eng,
-		Transport: newMemTransport(),
+		Transport: NewMemTransport(),
 		ElectionTimeout: 500 * time.Millisecond,
 	})
 
@@ -322,7 +322,7 @@ func TestRaftRequestVoteRejectLowerTerm(t *testing.T) {
 		ID:     1,
 		Config: cfg,
 		Engine: eng,
-		Transport: newMemTransport(),
+		Transport: NewMemTransport(),
 		ElectionTimeout: 500 * time.Millisecond,
 	})
 
@@ -362,7 +362,7 @@ func TestRaftRequestVoteGrant(t *testing.T) {
 		ID:     1,
 		Config: cfg,
 		Engine: eng,
-		Transport: newMemTransport(),
+		Transport: NewMemTransport(),
 		ElectionTimeout: 500 * time.Millisecond,
 	})
 

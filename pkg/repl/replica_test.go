@@ -17,7 +17,7 @@ func CreateTestCluster(n int, timeout time.Duration) ([]*ReplicaSet, error) {
 		})
 	}
 
-	transport := newMemTransport()
+	transport := NewMemTransport()
 	nodes := make([]*ReplicaSet, n)
 
 	for i := range n {

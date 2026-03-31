@@ -36,7 +36,7 @@ func NewReplicaSet(cfg ReplicaSetConfig) *ReplicaSet {
 	// If no transport provided, create an in-memory one for testing
 	transport := cfg.Transport
 	if transport == nil {
-		transport = newMemTransport()
+		transport = NewMemTransport()
 	}
 
 	sm := NewMammothStateMachine(cfg.Engine)
@@ -209,7 +209,8 @@ type memTransport struct {
 	nodes map[uint64]*Raft
 }
 
-func newMemTransport() *memTransport {
+// NewMemTransport creates an in-memory transport for testing.
+func NewMemTransport() *memTransport {
 	return &memTransport{nodes: make(map[uint64]*Raft)}
 }
 

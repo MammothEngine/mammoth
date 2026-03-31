@@ -8,7 +8,7 @@ import (
 )
 
 func TestReplicaSetManager_AddMember(t *testing.T) {
-	mt := newMemTransport()
+	mt := NewMemTransport()
 	cfg := &ClusterConfig{
 		Nodes: []NodeConfig{
 			{ID: 1, Address: "localhost:27017", Voter: true},
@@ -47,7 +47,7 @@ func TestReplicaSetManager_AddMember(t *testing.T) {
 }
 
 func TestReplicaSetManager_Status(t *testing.T) {
-	mt := newMemTransport()
+	mt := NewMemTransport()
 	cfg := &ClusterConfig{
 		Nodes: []NodeConfig{
 			{ID: 1, Address: "localhost:27017", Voter: true},
@@ -81,7 +81,7 @@ func TestReplicaSetManager_Status(t *testing.T) {
 }
 
 func TestReplicaSetManager_IsMaster(t *testing.T) {
-	mt := newMemTransport()
+	mt := NewMemTransport()
 	cfg := &ClusterConfig{
 		Nodes: []NodeConfig{
 			{ID: 1, Address: "localhost:27017", Voter: true},
@@ -115,7 +115,7 @@ func TestReplicaSetManager_IsMaster(t *testing.T) {
 }
 
 func TestReplicaSetManager_ReplicationLag(t *testing.T) {
-	mt := newMemTransport()
+	mt := NewMemTransport()
 	cfg := &ClusterConfig{
 		Nodes: []NodeConfig{
 			{ID: 1, Address: "localhost:27017", Voter: true},
@@ -144,7 +144,7 @@ func TestReplicaSetManager_ReplicationLag(t *testing.T) {
 }
 
 func TestReplicaSetManager_UpdateHeartbeat(t *testing.T) {
-	mt := newMemTransport()
+	mt := NewMemTransport()
 	cfg := &ClusterConfig{
 		Nodes: []NodeConfig{
 			{ID: 1, Address: "localhost:27017", Voter: true},
@@ -175,7 +175,7 @@ func TestReplicaSetManager_UpdateHeartbeat(t *testing.T) {
 }
 
 func TestReplicaSetManager_StepDown(t *testing.T) {
-	mt := newMemTransport()
+	mt := NewMemTransport()
 	cfg := &ClusterConfig{
 		Nodes: []NodeConfig{
 			{ID: 1, Address: "localhost:27017", Voter: true},
@@ -202,7 +202,7 @@ func TestReplicaSetManager_StepDown(t *testing.T) {
 }
 
 func TestReplicaSetManager_Freeze(t *testing.T) {
-	mt := newMemTransport()
+	mt := NewMemTransport()
 	cfg := &ClusterConfig{
 		Nodes: []NodeConfig{
 			{ID: 1, Address: "localhost:27017", Voter: true},
@@ -228,7 +228,7 @@ func TestReplicaSetManager_Freeze(t *testing.T) {
 }
 
 func TestReplicaSetManager_RemoveMember(t *testing.T) {
-	mt := newMemTransport()
+	mt := NewMemTransport()
 	cfg := &ClusterConfig{
 		Nodes: []NodeConfig{
 			{ID: 1, Address: "localhost:27017", Voter: true},
@@ -261,7 +261,7 @@ func TestReplicaSetManager_RemoveMember(t *testing.T) {
 }
 
 func TestReplicaSetManager_Reconfig(t *testing.T) {
-	mt := newMemTransport()
+	mt := NewMemTransport()
 	cfg := &ClusterConfig{
 		Nodes: []NodeConfig{
 			{ID: 1, Address: "localhost:27017", Voter: true},

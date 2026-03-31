@@ -242,6 +242,9 @@ func TestRealWireProtocol(t *testing.T) {
 
 // TestRealReplicationScenario tests a real replication workflow
 func TestRealReplicationScenario(t *testing.T) {
+	// Create shared transport for all nodes
+	sharedTransport := repl.NewMemTransport()
+
 	// Create 3 nodes
 	nodes := make([]*testNode, 3)
 	for i := 0; i < 3; i++ {
@@ -260,18 +263,24 @@ func TestRealReplicationScenario(t *testing.T) {
 		}
 
 		rs := repl.NewReplicaSet(repl.ReplicaSetConfig{
-			ID:     uint64(i + 1),
-			Config: cfg,
-			Engine: &engineAdapter{eng},
+			ID:        uint64(i + 1),
+			Config:    cfg,
+			Engine:    &engineAdapter{eng},
+			Transport: sharedTransport,
 		})
 		rs.Start()
 
 		nodes[i] = &testNode{
-			id:   uint64(i + 1),
-			rs:   rs,
-			eng:  eng,
-			cat:  mongo.NewCatalog(eng),
+			id:  uint64(i + 1),
+			rs:  rs,
+			eng: eng,
+			cat: mongo.NewCatalog(eng),
 		}
+	}
+
+	// Register all nodes with shared transport
+	for _, n := range nodes {
+		sharedTransport.Register(n.id, n.rs.RaftNode())
 	}
 
 	// Cleanup
