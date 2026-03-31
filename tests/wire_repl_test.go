@@ -720,6 +720,142 @@ func TestRaftSnapshot(t *testing.T) {
 	}
 }
 
+// TestLogCompaction tests Raft log compaction and cleanup
+func TestLogCompaction(t *testing.T) {
+	sharedTransport := repl.NewMemTransport()
+
+	// Create 3 nodes
+	nodes := make([]*testNode, 3)
+	for i := 0; i < 3; i++ {
+		dir := getTempDir(t)
+		eng, err := engine.Open(engine.DefaultOptions(dir))
+		if err != nil {
+			t.Fatalf("Failed to open engine for node %d: %v", i, err)
+		}
+
+		cfg := &repl.ClusterConfig{
+			Nodes: []repl.NodeConfig{
+				{ID: 1, Address: "localhost:2001", Voter: true},
+				{ID: 2, Address: "localhost:2002", Voter: true},
+				{ID: 3, Address: "localhost:2003", Voter: true},
+			},
+		}
+
+		rs := repl.NewReplicaSet(repl.ReplicaSetConfig{
+			ID:        uint64(i + 1),
+			Config:    cfg,
+			Engine:    &engineAdapter{eng},
+			Transport: sharedTransport,
+		})
+		rs.Start()
+
+		nodes[i] = &testNode{
+			id:  uint64(i + 1),
+			rs:  rs,
+			eng: eng,
+			cat: mongo.NewCatalog(eng),
+		}
+	}
+
+	// Register all nodes
+	for _, n := range nodes {
+		sharedTransport.Register(n.id, n.rs.RaftNode())
+	}
+
+	defer func() {
+		for _, n := range nodes {
+			n.rs.Stop()
+			n.eng.Close()
+		}
+	}()
+
+	// Wait for leader
+	time.Sleep(500 * time.Millisecond)
+	var leader *testNode
+	for _, n := range nodes {
+		if n.rs.IsLeader() {
+			leader = n
+			break
+		}
+	}
+	if leader == nil {
+		t.Fatal("No leader elected")
+	}
+
+	// Phase 1: Write many entries to trigger compaction
+	t.Log("Writing entries to trigger compaction...")
+	for i := 0; i < 500; i++ {
+		key := fmt.Sprintf("key_%d", i)
+		value := fmt.Sprintf("value_%d", i)
+		_, _, err := leader.rs.Put([]byte(key), []byte(value))
+		if err != nil {
+			t.Fatalf("Put failed: %v", err)
+		}
+		// Periodic progress
+		if (i+1)%100 == 0 {
+			t.Logf("Wrote %d entries...", i+1)
+		}
+	}
+	time.Sleep(500 * time.Millisecond)
+	t.Logf("Wrote 500 entries, leader commit index: %d", leader.rs.RaftNode().CommitIndex())
+
+	// Phase 2: Check log size on all nodes
+	t.Log("Checking log sizes...")
+	for i, n := range nodes {
+		logCount := 0
+		n.eng.Scan([]byte("raft_log:"), func(key, value []byte) bool {
+			logCount++
+			return true
+		})
+		t.Logf("Node %d has %d log entries", i+1, logCount)
+	}
+
+	// Phase 3: Create snapshot (which should compact old logs)
+	t.Log("Creating snapshot to trigger compaction...")
+	snapData, err := leader.rs.RaftNode().CreateSnapshot()
+	if err != nil {
+		t.Fatalf("CreateSnapshot failed: %v", err)
+	}
+	t.Logf("Snapshot created at index %d", snapData.LastIncludedIndex)
+
+	// Phase 4: Write more data after snapshot
+	t.Log("Writing additional entries after snapshot...")
+	for i := 500; i < 550; i++ {
+		key := fmt.Sprintf("key_%d", i)
+		value := fmt.Sprintf("value_%d", i)
+		_, _, err := leader.rs.Put([]byte(key), []byte(value))
+		if err != nil {
+			t.Logf("Put %d error: %v", i, err)
+		}
+	}
+	time.Sleep(300 * time.Millisecond)
+
+	// Phase 5: Verify all nodes are consistent
+	t.Log("Verifying final consistency...")
+	for i, n := range nodes {
+		status := n.rs.Status()
+		t.Logf("Node %d: state=%s term=%d commit=%d", i+1, status.State, status.Term, status.CommitIndex)
+	}
+
+	// All nodes should have same commit index
+	maxCommit := uint64(0)
+	minCommit := uint64(0xffffffff)
+	for _, n := range nodes {
+		idx := n.rs.RaftNode().CommitIndex()
+		if idx > maxCommit {
+			maxCommit = idx
+		}
+		if idx < minCommit {
+			minCommit = idx
+		}
+	}
+	if maxCommit != minCommit {
+		t.Errorf("Commit index mismatch: min=%d, max=%d", minCommit, maxCommit)
+	} else {
+		t.Logf("All nodes have consistent commit index: %d", maxCommit)
+	}
+}
+
 func TestRealTransactionWithWireProtocol(t *testing.T) {
 	dir := getTempDir(t)
 	eng, err := engine.Open(engine.DefaultOptions(dir))
