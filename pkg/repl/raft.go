@@ -2,6 +2,7 @@ package repl
 
 import (
 	"encoding/json"
+	"fmt"
 	"math/rand"
 	"sync"
 	"sync/atomic"
@@ -675,4 +676,26 @@ func (r *Raft) Freeze(duration time.Duration) {
 		r.electionTimeout = originalTimeout
 		r.mu.Unlock()
 	}()
+}
+
+// CreateSnapshot creates a snapshot of the current state machine.
+func (r *Raft) CreateSnapshot() (SnapshotData, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// Get last log info
+	lastIdx, _ := r.log.LastIndex()
+	var lastTerm uint64
+	if lastIdx > 0 {
+		entry, _ := r.log.Entry(lastIdx)
+		lastTerm = entry.Term
+	}
+
+	// For now, return a simple snapshot with metadata
+	// In production, this would serialize the full state
+	return SnapshotData{
+		LastIncludedIndex: lastIdx,
+		LastIncludedTerm:  lastTerm,
+		Data:              []byte(fmt.Sprintf("snapshot_at_index_%d", lastIdx)),
+	}, nil
 }

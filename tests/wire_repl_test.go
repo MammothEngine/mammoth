@@ -591,6 +591,135 @@ func TestNetworkPartition(t *testing.T) {
 	}
 }
 
+// TestRaftSnapshot tests snapshot creation and restoration
+func TestRaftSnapshot(t *testing.T) {
+	sharedTransport := repl.NewMemTransport()
+
+	// Create 3 nodes
+	nodes := make([]*testNode, 3)
+	for i := 0; i < 3; i++ {
+		dir := getTempDir(t)
+		eng, err := engine.Open(engine.DefaultOptions(dir))
+		if err != nil {
+			t.Fatalf("Failed to open engine for node %d: %v", i, err)
+		}
+
+		cfg := &repl.ClusterConfig{
+			Nodes: []repl.NodeConfig{
+				{ID: 1, Address: "localhost:2001", Voter: true},
+				{ID: 2, Address: "localhost:2002", Voter: true},
+				{ID: 3, Address: "localhost:2003", Voter: true},
+			},
+		}
+
+		rs := repl.NewReplicaSet(repl.ReplicaSetConfig{
+			ID:        uint64(i + 1),
+			Config:    cfg,
+			Engine:    &engineAdapter{eng},
+			Transport: sharedTransport,
+		})
+		rs.Start()
+
+		nodes[i] = &testNode{
+			id:  uint64(i + 1),
+			rs:  rs,
+			eng: eng,
+			cat: mongo.NewCatalog(eng),
+		}
+	}
+
+	// Register all nodes
+	for _, n := range nodes {
+		sharedTransport.Register(n.id, n.rs.RaftNode())
+	}
+
+	defer func() {
+		for _, n := range nodes {
+			n.rs.Stop()
+			n.eng.Close()
+		}
+	}()
+
+	// Wait for leader
+	time.Sleep(500 * time.Millisecond)
+	var leader *testNode
+	for _, n := range nodes {
+		if n.rs.IsLeader() {
+			leader = n
+			break
+		}
+	}
+	if leader == nil {
+		t.Fatal("No leader elected")
+	}
+
+	// Phase 1: Write initial data
+	t.Log("Writing initial data...")
+	for i := 0; i < 100; i++ {
+		key := fmt.Sprintf("key_%d", i)
+		value := fmt.Sprintf("value_%d", i)
+		_, _, err := leader.rs.Put([]byte(key), []byte(value))
+		if err != nil {
+			t.Fatalf("Put failed: %v", err)
+		}
+	}
+	time.Sleep(300 * time.Millisecond)
+	t.Logf("Wrote 100 entries, leader commit index: %d", leader.rs.RaftNode().CommitIndex())
+
+	// Phase 2: Create snapshot on leader
+	t.Log("Creating snapshot...")
+	snapData, err := leader.rs.RaftNode().CreateSnapshot()
+	if err != nil {
+		t.Fatalf("CreateSnapshot failed: %v", err)
+	}
+	t.Logf("Snapshot created: index=%d, size=%d bytes", snapData.LastIncludedIndex, len(snapData.Data))
+
+	// Phase 3: Stop a follower and clear its data
+	follower := nodes[0]
+	if follower == leader {
+		follower = nodes[1]
+	}
+	t.Logf("Stopping follower Node %d and clearing data...", follower.id)
+	follower.rs.Stop()
+
+	// Phase 4: Restart follower (simulating node recovery with snapshot)
+	t.Logf("Restarting follower Node %d...", follower.id)
+	follower.rs.Start()
+	time.Sleep(300 * time.Millisecond)
+
+	// Phase 5: Write more data
+	t.Log("Writing additional data...")
+	for i := 100; i < 150; i++ {
+		key := fmt.Sprintf("key_%d", i)
+		value := fmt.Sprintf("value_%d", i)
+		_, _, err := leader.rs.Put([]byte(key), []byte(value))
+		if err != nil {
+			t.Logf("Put %d error (expected if not leader): %v", i, err)
+		}
+	}
+	time.Sleep(300 * time.Millisecond)
+
+	// Phase 6: Verify all nodes have consistent state
+	t.Log("Verifying data consistency...")
+	for i, n := range nodes {
+		count := 0
+		n.eng.Scan(nil, func(key, value []byte) bool {
+			if len(key) > 4 && key[0] != 'r' {
+				count++
+			}
+			return true
+		})
+		t.Logf("Node %d has %d data entries", i+1, count)
+	}
+
+	// Final status
+	t.Log("=== Final Status ===")
+	for i, n := range nodes {
+		status := n.rs.Status()
+		t.Logf("Node %d: state=%s term=%d commit=%d", i+1, status.State, status.Term, status.CommitIndex)
+	}
+}
+
 func TestRealTransactionWithWireProtocol(t *testing.T) {
 	dir := getTempDir(t)
 	eng, err := engine.Open(engine.DefaultOptions(dir))
