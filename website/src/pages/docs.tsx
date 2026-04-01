@@ -133,7 +133,7 @@ function Navbar() {
 // Docs-specific Navbar (appears below main navbar)
 function DocsNavbar({ onMenuToggle }: { onMenuToggle: () => void }) {
   return (
-    <div className="sticky top-16 lg:top-20 z-40 bg-background/95 backdrop-blur-xl border-b border-border">
+    <div className="sticky top-20 z-40 bg-background/95 backdrop-blur-xl border-b border-border">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center gap-4 h-12">
           <button
@@ -178,7 +178,7 @@ function Sidebar({
       )}
 
       <aside
-        className={`fixed lg:sticky top-[7.5rem] lg:top-32 left-0 z-50 w-72 h-[calc(100vh-7.5rem)] lg:h-[calc(100vh-8rem)] bg-background border-r border-border overflow-y-auto transition-transform duration-300 lg:translate-x-0 ${
+        className={`fixed lg:sticky top-32 lg:top-32 left-0 z-50 w-72 h-[calc(100vh-8rem)] bg-background border-r border-border overflow-y-auto transition-transform duration-300 lg:translate-x-0 ${
           isOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
@@ -411,13 +411,13 @@ export default function DocsPage() {
         />
 
         <main className="flex-1 min-w-0 lg:ml-0">
-          <div className="px-4 sm:px-6 lg:px-8 py-8 pt-8">
+          <div className="px-4 sm:px-6 lg:px-8 py-12 pt-36">
             <DocsContent slug={slug} />
           </div>
         </main>
 
         {/* Table of Contents (placeholder for future) */}
-        <div className="hidden xl:block w-64 sticky top-32 h-[calc(100vh-8rem)] overflow-y-auto px-4">
+        <div className="hidden xl:block w-64 sticky top-36 h-[calc(100vh-9rem)] overflow-y-auto px-4">
           <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-4">
             On this page
           </h4>
