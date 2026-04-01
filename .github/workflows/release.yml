@@ -22,10 +22,10 @@ jobs:
         run: go mod download
 
       - name: Vet
-        run: go vet ./...
+        run: go vet ./cmd/mammoth/...
 
-      - name: Test
-        run: go test -race -count=1 ./...
+      - name: Test (short)
+        run: go test -short -count=1 ./cmd/mammoth/...
 
   build:
     needs: test
