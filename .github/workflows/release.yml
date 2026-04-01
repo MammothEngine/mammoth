@@ -68,6 +68,7 @@ jobs:
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
+        shell: bash
         run: |
           output="mammoth-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.suffix }}"
           go build -ldflags "-s -w -X main.version=${{ github.ref_name }}" -o "$output" ./cmd/mammoth
