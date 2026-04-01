@@ -39,8 +39,8 @@ func main() {
 		validateCmd(os.Args[2:])
 	case "stats":
 		statsCmd(os.Args[2:])
-	case "bench":
-		benchCmd(os.Args[2:])
+	/* case "bench":
+		benchCmd(os.Args[2:]) */
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", os.Args[1])
 		os.Exit(1)
