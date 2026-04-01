@@ -178,7 +178,7 @@ function Sidebar({
       )}
 
       <aside
-        className={`fixed lg:sticky top-44 lg:top-44 left-0 z-50 w-72 h-[calc(100vh-11rem)] bg-background border-r border-border overflow-y-auto transition-transform duration-300 lg:translate-x-0 ${
+        className={`fixed lg:sticky top-32 lg:top-32 left-0 z-40 w-72 h-[calc(100vh-8rem)] bg-background border-r border-border overflow-y-auto transition-transform duration-300 lg:translate-x-0 ${
           isOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
@@ -403,7 +403,7 @@ export default function DocsPage() {
       <Navbar />
       <DocsNavbar onMenuToggle={() => setSidebarOpen(!sidebarOpen)} />
 
-      <div className="max-w-7xl mx-auto flex flex-1 w-full">
+      <div className="max-w-7xl mx-auto flex flex-1 w-full pt-32">
         <Sidebar
           activeSlug={slug}
           isOpen={sidebarOpen}
@@ -411,13 +411,13 @@ export default function DocsPage() {
         />
 
         <main className="flex-1 min-w-0 lg:ml-0">
-          <div className="px-4 sm:px-6 lg:px-8 py-12 pt-44">
+          <div className="px-4 sm:px-6 lg:px-8 py-8">
             <DocsContent slug={slug} />
           </div>
         </main>
 
         {/* Table of Contents (placeholder for future) */}
-        <div className="hidden xl:block w-64 sticky top-44 h-[calc(100vh-11rem)] overflow-y-auto px-4">
+        <div className="hidden xl:block w-64 sticky top-32 h-[calc(100vh-8rem)] overflow-y-auto px-4 py-8">
           <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-4">
             On this page
           </h4>
