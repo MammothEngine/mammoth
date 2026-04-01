@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mammoth Engine</title>
+  <script type="text/javascript">
+    // Single Page Apps for GitHub Pages
+    // MIT License
+    // https://github.com/rafgraph/spa-github-pages
+    (function(l) {
+      if (l.search[1] === '/' ) {
+        var decoded = l.search.slice(1).split('&').map(function(s) {
+          return s.replace(/~and~/g, '&')
+        }).join('?');
+        window.history.replaceState(null, null,
+            l.pathname.slice(0, -1) + decoded + l.hash
+        );
+      }
+    }(window.location))
+  </script>
+  <script>
+    // Redirect to the main app
+    var pathSegments = window.location.pathname.split('/');
+    var repo = pathSegments[1];
+    var path = pathSegments.slice(2).join('/');
+
+    // If we're on a custom domain (no repo in path), just reload the root
+    if (window.location.hostname === 'mammothengine.com' ||
+        window.location.hostname === 'www.mammothengine.com') {
+      window.location.href = '/' + window.location.search + window.location.hash;
+    } else {
+      // GitHub Pages subdomain
+      window.location.href = '/' + repo + '/?/' + path + window.location.search + window.location.hash;
+    }
+  </script>
+</head>
+<body>
+  <noscript>You need to enable JavaScript to run this app.</noscript>
+</body>
+</html>
