@@ -1,0 +1,135 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test -race -count=1 ./...
+
+  build:
+    needs: test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            suffix: ''
+          - os: ubuntu-latest
+            goos: linux
+            goarch: arm64
+            suffix: ''
+          - os: windows-latest
+            goos: windows
+            goarch: amd64
+            suffix: '.exe'
+          - os: macos-latest
+            goos: darwin
+            goarch: amd64
+            suffix: ''
+          - os: macos-latest
+            goos: darwin
+            goarch: arm64
+            suffix: ''
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          output="mammoth-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.suffix }}"
+          go build -ldflags "-s -w -X main.version=${{ github.ref_name }}" -o "$output" ./cmd/mammoth
+          echo "Built: $output"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mammoth-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: mammoth-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.suffix }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create archives
+        run: |
+          mkdir -p dist
+          for file in artifacts/mammoth-*; do
+            if [ -f "$file" ]; then
+              name=$(basename "$file")
+              # Remove .exe suffix for archive name
+              archive_name="${name%.exe}"
+              if [[ "$name" == *.exe ]]; then
+                zip -j "dist/${archive_name}.zip" "$file"
+              else
+                tar -czf "dist/${archive_name}.tar.gz" -C artifacts "$name"
+              fi
+            fi
+          done
+          ls -la dist/
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          version="${{ github.ref_name }}"
+          echo "changelog<<EOF" >> $GITHUB_OUTPUT
+          echo "## Changes in $version" >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "### Features" >> $GITHUB_OUTPUT
+          echo "- Initial alpha release" >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "### Binaries" >> $GITHUB_OUTPUT
+          echo "| Platform | Architecture |" >> $GITHUB_OUTPUT
+          echo "|----------|-------------|" >> $GITHUB_OUTPUT
+          echo "| Linux | amd64, arm64 |" >> $GITHUB_OUTPUT
+          echo "| Windows | amd64 |" >> $GITHUB_OUTPUT
+          echo "| macOS | amd64, arm64 |" >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "### Checksums" >> $GITHUB_OUTPUT
+          cd dist && sha256sum * >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: dist/*
+          body: ${{ steps.changelog.outputs.changelog }}
+          draft: false
+          prerelease: true
+          name: "Mammoth Engine ${{ github.ref_name }}"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -6,7 +6,7 @@ import (
 	"runtime"
 )
 
-const version = "0.9.0"
+var version = "0.0.1" // Build-time variable, override with -ldflags
 
 func main() {
 	if len(os.Args) < 2 {

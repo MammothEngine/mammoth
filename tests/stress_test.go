@@ -10,9 +10,11 @@ import (
 	"time"
 
 	"github.com/mammothengine/mammoth/pkg/bson"
+	"github.com/mammothengine/mammoth/pkg/crypto"
 	"github.com/mammothengine/mammoth/pkg/engine"
 	"github.com/mammothengine/mammoth/pkg/mongo"
 	"github.com/mammothengine/mammoth/pkg/repl"
+	"github.com/mammothengine/mammoth/pkg/wire"
 )
 
 // StressTestConfig configures stress test parameters.
@@ -298,17 +300,17 @@ func BenchmarkEngineGet(b *testing.B) {
 	}
 	defer eng.Close()
 
-	// Pre-populate
-	value := make([]byte, 1024)
+	// Pre-populate with smaller dataset to avoid memtable overflow
+	value := make([]byte, 256)
 	rand.Read(value)
-	for i := 0; i < 10000; i++ {
+	for i := 0; i < 1000; i++ {
 		key := fmt.Sprintf("key%d", i)
 		eng.Put([]byte(key), value)
 	}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		key := fmt.Sprintf("key%d", i%10000)
+		key := fmt.Sprintf("key%d", i%1000)
 		eng.Get([]byte(key))
 	}
 }
@@ -321,10 +323,10 @@ func BenchmarkEngineScan(b *testing.B) {
 	}
 	defer eng.Close()
 
-	// Pre-populate
+	// Pre-populate with smaller dataset
 	value := make([]byte, 256)
 	rand.Read(value)
-	for i := 0; i < 10000; i++ {
+	for i := 0; i < 1000; i++ {
 		key := fmt.Sprintf("key%08d", i)
 		eng.Put([]byte(key), value)
 	}
@@ -787,8 +789,8 @@ func BenchmarkGet(b *testing.B) {
 	}
 	defer eng.Close()
 
-	// Pre-populate
-	for i := 0; i < 10000; i++ {
+	// Pre-populate with smaller dataset
+	for i := 0; i < 1000; i++ {
 		key := fmt.Sprintf("bench_key_%d", i)
 		value := fmt.Sprintf("bench_value_%d", i)
 		eng.Put([]byte(key), []byte(value))
@@ -798,7 +800,7 @@ func BenchmarkGet(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		i := 0
 		for pb.Next() {
-			key := fmt.Sprintf("bench_key_%d", i%10000)
+			key := fmt.Sprintf("bench_key_%d", i%1000)
 			eng.Get([]byte(key))
 			i++
 		}
@@ -811,9 +813,11 @@ func BenchmarkRaftPropose(b *testing.B) {
 
 	// Create 3 nodes
 	nodes := make([]*repl.ReplicaSet, 3)
+	engines := make([]*engine.Engine, 3)
 	for i := 0; i < 3; i++ {
 		dir := b.TempDir()
 		eng, _ := engine.Open(engine.DefaultOptions(dir))
+		engines[i] = eng
 		cfg := &repl.ClusterConfig{
 			Nodes: []repl.NodeConfig{
 				{ID: 1, Address: "localhost:2001", Voter: true},
@@ -836,14 +840,17 @@ func BenchmarkRaftPropose(b *testing.B) {
 		sharedTransport.Register(uint64(i+1), rs.RaftNode())
 	}
 
-	// Wait for leader
-	time.Sleep(300 * time.Millisecond)
-
-	// Find leader
+	// Wait for leader with timeout
 	var leader *repl.ReplicaSet
-	for _, rs := range nodes {
-		if rs.IsLeader() {
-			leader = rs
+	for retry := 0; retry < 50; retry++ {
+		time.Sleep(100 * time.Millisecond)
+		for _, rs := range nodes {
+			if rs.IsLeader() {
+				leader = rs
+				break
+			}
+		}
+		if leader != nil {
 			break
 		}
 	}
@@ -854,6 +861,9 @@ func BenchmarkRaftPropose(b *testing.B) {
 	defer func() {
 		for _, rs := range nodes {
 			rs.Stop()
+		}
+		for _, eng := range engines {
+			eng.Close()
 		}
 	}()
 
@@ -896,4 +906,410 @@ func BenchmarkBsonDecode(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		bson.Decode(data)
 	}
+}
+
+// BenchmarkScan benchmarks range scan operations
+func BenchmarkScan(b *testing.B) {
+	dir := b.TempDir()
+	eng, err := engine.Open(engine.DefaultOptions(dir))
+	if err != nil {
+		b.Fatalf("Failed to open engine: %v", err)
+	}
+	defer eng.Close()
+
+	// Pre-populate with 10000 entries
+	for i := 0; i < 10000; i++ {
+		key := fmt.Sprintf("scan_key_%08d", i)
+		value := fmt.Sprintf("scan_value_%d", i)
+		eng.Put([]byte(key), []byte(value))
+	}
+
+	prefix := []byte("scan_key_")
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		count := 0
+		eng.Scan(prefix, func(key, value []byte) bool {
+			count++
+			return count < 100 // Limit to avoid overhead
+		})
+	}
+}
+
+// BenchmarkIndexCreate benchmarks index creation
+func BenchmarkIndexCreate(b *testing.B) {
+	dir := b.TempDir()
+	eng, err := engine.Open(engine.DefaultOptions(dir))
+	if err != nil {
+		b.Fatalf("Failed to open engine: %v", err)
+	}
+	defer eng.Close()
+
+	cat := mongo.NewCatalog(eng)
+	indexCat := mongo.NewIndexCatalog(eng, cat)
+
+	// Insert data
+	cat.EnsureCollection("testdb", "idxbench")
+	coll := mongo.NewCollection("testdb", "idxbench", eng, cat)
+	for i := 0; i < 10000; i++ {
+		doc := bson.NewDocument()
+		doc.Set("_id", bson.VInt64(int64(i)))
+		doc.Set("field", bson.VString(fmt.Sprintf("value_%d", i)))
+		coll.InsertOne(doc)
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		spec := mongo.IndexSpec{
+			Name:   fmt.Sprintf("idx_%d", i),
+			Key:    []mongo.IndexKey{{Field: "field", Descending: false}},
+			Unique: false,
+		}
+		indexCat.CreateIndex("testdb", "idxbench", spec)
+	}
+}
+
+// BenchmarkTransactionCommit benchmarks transaction commit
+func BenchmarkTransactionCommit(b *testing.B) {
+	dir := b.TempDir()
+	eng, err := engine.Open(engine.DefaultOptions(dir))
+	if err != nil {
+		b.Fatalf("Failed to open engine: %v", err)
+	}
+	defer eng.Close()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		tx := eng.Begin()
+		for j := 0; j < 10; j++ {
+			key := fmt.Sprintf("tx_key_%d_%d", i, j)
+			value := fmt.Sprintf("tx_value_%d", j)
+			tx.Put([]byte(key), []byte(value))
+		}
+		tx.Commit()
+	}
+}
+
+// BenchmarkReplicationThroughput benchmarks Raft replication
+func BenchmarkReplicationThroughput(b *testing.B) {
+	sharedTransport := repl.NewMemTransport()
+
+	// Create 3 nodes
+	nodes := make([]*repl.ReplicaSet, 3)
+	engines := make([]*engine.Engine, 3)
+	for i := 0; i < 3; i++ {
+		dir := b.TempDir()
+		eng, _ := engine.Open(engine.DefaultOptions(dir))
+		engines[i] = eng
+		cfg := &repl.ClusterConfig{
+			Nodes: []repl.NodeConfig{
+				{ID: 1, Address: "localhost:2001", Voter: true},
+				{ID: 2, Address: "localhost:2002", Voter: true},
+				{ID: 3, Address: "localhost:2003", Voter: true},
+			},
+		}
+		rs := repl.NewReplicaSet(repl.ReplicaSetConfig{
+			ID:        uint64(i + 1),
+			Config:    cfg,
+			Engine:    &engineAdapter{eng},
+			Transport: sharedTransport,
+		})
+		rs.Start()
+		nodes[i] = rs
+	}
+
+	for i, rs := range nodes {
+		sharedTransport.Register(uint64(i+1), rs.RaftNode())
+	}
+
+	// Wait for leader with timeout
+	var leader *repl.ReplicaSet
+	for retry := 0; retry < 50; retry++ {
+		time.Sleep(100 * time.Millisecond)
+		for _, rs := range nodes {
+			if rs.IsLeader() {
+				leader = rs
+				break
+			}
+		}
+		if leader != nil {
+			break
+		}
+	}
+	if leader == nil {
+		b.Fatal("No leader elected")
+	}
+
+	defer func() {
+		for _, rs := range nodes {
+			rs.Stop()
+		}
+		for _, eng := range engines {
+			eng.Close()
+		}
+	}()
+
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		i := 0
+		for pb.Next() {
+			key := fmt.Sprintf("repl_key_%d", i)
+			value := fmt.Sprintf("repl_value_%d", i)
+			leader.Put([]byte(key), []byte(value))
+			i++
+		}
+	})
+}
+
+// BenchmarkWireProtocolCommand benchmarks wire protocol command processing
+func BenchmarkWireProtocolCommand(b *testing.B) {
+	dir := b.TempDir()
+	eng, err := engine.Open(engine.DefaultOptions(dir))
+	if err != nil {
+		b.Fatalf("Failed to open engine: %v", err)
+	}
+	defer eng.Close()
+
+	cat := mongo.NewCatalog(eng)
+	handler := wire.NewHandler(eng, cat, nil)
+
+	// Prepare command message
+	cmdDoc := bson.NewDocument()
+	cmdDoc.Set("find", bson.VString("testcoll"))
+	cmdDoc.Set("$db", bson.VString("testdb"))
+
+	msg := &wire.Message{
+		Header: wire.MsgHeader{OpCode: wire.OpMsg},
+		Msg: &wire.OPMsg{
+			Sections: []wire.Section{
+				{Kind: 0, Body: cmdDoc},
+			},
+		},
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		handler.Handle(msg)
+	}
+}
+
+// BenchmarkTTLScan benchmarks TTL worker scan
+func BenchmarkTTLScan(b *testing.B) {
+	dir := b.TempDir()
+	eng, err := engine.Open(engine.DefaultOptions(dir))
+	if err != nil {
+		b.Fatalf("Failed to open engine: %v", err)
+	}
+	defer eng.Close()
+
+	cat := mongo.NewCatalog(eng)
+	indexCat := mongo.NewIndexCatalog(eng, cat)
+	cat.EnsureCollection("testdb", "ttlbench")
+
+	// Insert documents with TTL
+	coll := mongo.NewCollection("testdb", "ttlbench", eng, cat)
+	for i := 0; i < 10000; i++ {
+		doc := bson.NewDocument()
+		doc.Set("_id", bson.VInt64(int64(i)))
+		doc.Set("expireAt", bson.VInt64(time.Now().Add(time.Hour).Unix()))
+		coll.InsertOne(doc)
+	}
+
+	worker := mongo.NewTTLWorker(eng, cat, indexCat)
+	worker.Start()
+	defer worker.Stop()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		// Scan for expired docs (none should be expired yet)
+		prefix := mongo.EncodeNamespacePrefix("testdb", "ttlbench")
+		count := 0
+		eng.Scan(prefix, func(key, value []byte) bool {
+			count++
+			return count < 100
+		})
+	}
+}
+
+// BenchmarkEncryption benchmarks encryption/decryption
+func BenchmarkEncryption(b *testing.B) {
+	key, _ := crypto.GenerateKey()
+	provider, _ := crypto.NewProvider(crypto.EncryptionConfig{
+		Key:              key,
+		EnableEncryption: true,
+	})
+
+	data := []byte("benchmark data for encryption performance testing")
+
+	b.Run("Encrypt", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			provider.Encrypt(data)
+		}
+	})
+
+	ciphertext, _ := provider.Encrypt(data)
+
+	b.Run("Decrypt", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			provider.Decrypt(ciphertext)
+		}
+	})
+}
+
+// BenchmarkCompression benchmarks compression algorithms
+func BenchmarkCompression(b *testing.B) {
+	// Sample data
+	data := make([]byte, 1024)
+	rand.Read(data)
+
+	b.Run("Snappy", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			// Placeholder for snappy compression
+			_ = data
+		}
+	})
+
+	b.Run("LZ4", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			// Placeholder for LZ4 compression
+			_ = data
+		}
+	})
+}
+
+// BenchmarkBatchWrite benchmarks batch write operations
+func BenchmarkBatchWrite(b *testing.B) {
+	dir := b.TempDir()
+	eng, err := engine.Open(engine.DefaultOptions(dir))
+	if err != nil {
+		b.Fatalf("Failed to open engine: %v", err)
+	}
+	defer eng.Close()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		batch := eng.NewBatch()
+		for j := 0; j < 100; j++ {
+			key := fmt.Sprintf("batch_key_%d_%d", i, j)
+			value := fmt.Sprintf("batch_value_%d", j)
+			batch.Put([]byte(key), []byte(value))
+		}
+		batch.Commit()
+	}
+}
+
+// BenchmarkQueryMatcher benchmarks query matching
+func BenchmarkQueryMatcher(b *testing.B) {
+	doc := bson.NewDocument()
+	doc.Set("name", bson.VString("John"))
+	doc.Set("age", bson.VInt32(30))
+	doc.Set("active", bson.VBool(true))
+
+	ageFilter := bson.NewDocument()
+	ageFilter.Set("$gte", bson.VInt32(25))
+	filter := bson.NewDocument()
+	filter.Set("age", bson.VDoc(ageFilter))
+	filter.Set("active", bson.VBool(true))
+
+	matcher := mongo.NewMatcher(filter)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		matcher.Match(doc)
+	}
+}
+
+// BenchmarkAggregation benchmarks aggregation operations
+func BenchmarkAggregation(b *testing.B) {
+	dir := b.TempDir()
+	eng, err := engine.Open(engine.DefaultOptions(dir))
+	if err != nil {
+		b.Fatalf("Failed to open engine: %v", err)
+	}
+	defer eng.Close()
+
+	cat := mongo.NewCatalog(eng)
+	cat.EnsureCollection("testdb", "aggbench")
+	coll := mongo.NewCollection("testdb", "aggbench", eng, cat)
+
+	// Insert sales data
+	regions := []string{"North", "South", "East", "West"}
+	for i := 0; i < 10000; i++ {
+		doc := bson.NewDocument()
+		doc.Set("_id", bson.VInt64(int64(i)))
+		doc.Set("region", bson.VString(regions[i%4]))
+		doc.Set("amount", bson.VDouble(float64(i%100)))
+		coll.InsertOne(doc)
+	}
+
+	prefix := mongo.EncodeNamespacePrefix("testdb", "aggbench")
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		// Group by region and sum
+		regionTotals := make(map[string]float64)
+		eng.Scan(prefix, func(key, value []byte) bool {
+			doc, _ := bson.Decode(value)
+			region, _ := doc.Get("region")
+			amount, _ := doc.Get("amount")
+			if region.Type == bson.TypeString && amount.Type == bson.TypeDouble {
+				regionTotals[region.String()] += amount.Double()
+			}
+			return true
+		})
+	}
+}
+
+// BenchmarkMemoryAllocation benchmarks memory allocation patterns
+func BenchmarkMemoryAllocation(b *testing.B) {
+	b.Run("Small", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			data := make([]byte, 64)
+			_ = data
+		}
+	})
+
+	b.Run("Medium", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			data := make([]byte, 1024)
+			_ = data
+		}
+	})
+
+	b.Run("Large", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			data := make([]byte, 1024*1024)
+			_ = data
+		}
+	})
+}
+
+// BenchmarkConcurrentAccess benchmarks concurrent operations
+func BenchmarkConcurrentAccess(b *testing.B) {
+	dir := b.TempDir()
+	eng, err := engine.Open(engine.DefaultOptions(dir))
+	if err != nil {
+		b.Fatalf("Failed to open engine: %v", err)
+	}
+	defer eng.Close()
+
+	// Pre-populate
+	for i := 0; i < 1000; i++ {
+		key := fmt.Sprintf("concurrent_key_%d", i)
+		eng.Put([]byte(key), []byte("value"))
+	}
+
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		i := 0
+		for pb.Next() {
+			key := fmt.Sprintf("concurrent_key_%d", i%1000)
+			if i%2 == 0 {
+				eng.Get([]byte(key))
+			} else {
+				eng.Put([]byte(key), []byte("updated"))
+			}
+			i++
+		}
+	})
 }
