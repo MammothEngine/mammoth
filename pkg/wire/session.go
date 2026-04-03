@@ -131,13 +131,3 @@ func (sm *SessionManager) GetTransaction(connID uint64) *engine.Transaction {
 	return s.Transaction
 }
 
-// GetTransactionDB returns the database context for the active transaction.
-func (sm *SessionManager) GetTransactionDB(connID uint64) string {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-	s := sm.sessions[connID]
-	if s == nil || !s.InTx {
-		return ""
-	}
-	return s.TxDB
-}

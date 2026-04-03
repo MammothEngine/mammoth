@@ -2,7 +2,6 @@ package mongo
 
 import (
 	"regexp"
-	"strings"
 
 	"github.com/mammothengine/mammoth/pkg/bson"
 )
@@ -314,18 +313,3 @@ func ParseValidator(body *bson.Document) (*Validator, error) {
 	return v, nil
 }
 
-// resolveField is an alias for ResolveField used in validation.
-func resolveFieldPath(doc *bson.Document, path string) (bson.Value, bool) {
-	parts := strings.SplitN(path, ".", 2)
-	v, ok := doc.Get(parts[0])
-	if !ok {
-		return bson.Value{}, false
-	}
-	if len(parts) == 1 {
-		return v, true
-	}
-	if v.Type == bson.TypeDocument {
-		return resolveFieldPath(v.DocumentValue(), parts[1])
-	}
-	return bson.Value{}, false
-}

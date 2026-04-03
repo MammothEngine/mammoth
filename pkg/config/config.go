@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -19,6 +20,35 @@ type ServerConfig struct {
 	Auth              AuthConfig    `json:"auth"`
 	Audit             AuditConfig   `json:"audit"`
 	SlowQueryThreshold time.Duration `json:"slowQueryThreshold"`
+
+	// Query timeout configuration
+	QueryTimeout time.Duration `json:"queryTimeout"` // Default query timeout (0 = no timeout)
+
+	// Rate limiting configuration
+	RateLimit RateLimitConfig `json:"rateLimit"`
+
+	// Circuit breaker configuration
+	CircuitBreaker CircuitBreakerConfig `json:"circuitBreaker"`
+}
+
+// RateLimitConfig holds rate limiting configuration.
+type RateLimitConfig struct {
+	Enabled           bool          `json:"enabled"`
+	RequestsPerSecond float64       `json:"requestsPerSecond"`
+	Burst             int           `json:"burst"`
+	PerConnection     bool          `json:"perConnection"`
+	GlobalRate        float64       `json:"globalRate"`
+	GlobalBurst       int           `json:"globalBurst"`
+	WaitTimeout       time.Duration `json:"waitTimeout"`
+}
+
+// CircuitBreakerConfig holds circuit breaker configuration.
+type CircuitBreakerConfig struct {
+	Enabled          bool          `json:"enabled"`
+	FailureThreshold uint32        `json:"failureThreshold"`
+	SuccessThreshold uint32        `json:"successThreshold"`
+	Timeout          time.Duration `json:"timeout"`
+	MaxRequests      uint32        `json:"maxRequests"`
 }
 
 // TLSConfig holds TLS configuration.
@@ -67,18 +97,16 @@ type EngineConfig struct {
 
 // ReplConfig holds replication configuration.
 type ReplConfig struct {
-	Enabled bool     `json:"enabled"`
-	NodeID  int      `json:"nodeId"`
-	Peers   []string `json:"peers"`
+	Enabled bool `json:"enabled"`
+	NodeID  int  `json:"nodeId"`
 }
 
 // ShardingConfig holds sharding configuration.
 type ShardingConfig struct {
-	Enabled      bool     `json:"enabled"`
-	ConfigServer string   `json:"configServer"`
-	Shards       []string `json:"shards"`
-	AutoSplit    bool     `json:"autoSplit"`
-	BalancerOn   bool     `json:"balancerOn"`
+	Enabled      bool   `json:"enabled"`
+	ConfigServer string `json:"configServer"`
+	AutoSplit    bool   `json:"autoSplit"`
+	BalancerOn   bool   `json:"balancerOn"`
 }
 
 // Config is the top-level configuration.
@@ -103,6 +131,23 @@ func DefaultConfig() *Config {
 			Auth:               AuthConfig{},
 			Audit:              AuditConfig{Path: "./audit.log"},
 			SlowQueryThreshold: 100 * time.Millisecond,
+			QueryTimeout:       30 * time.Second, // Default 30 second query timeout
+			RateLimit: RateLimitConfig{
+				Enabled:           false,
+				RequestsPerSecond: 1000,
+				Burst:             100,
+				PerConnection:     true,
+				GlobalRate:        10000,
+				GlobalBurst:       1000,
+				WaitTimeout:       100 * time.Millisecond,
+			},
+			CircuitBreaker: CircuitBreakerConfig{
+				Enabled:          false,
+				FailureThreshold: 5,
+				SuccessThreshold: 3,
+				Timeout:          30 * time.Second,
+				MaxRequests:      1,
+			},
 		},
 		Engine: EngineConfig{
 			MemtableSize:     64 * 1024 * 1024, // 64MB
@@ -158,6 +203,7 @@ func (c *Config) applyTOML(t TOMLConfig) {
 		c.Server.Audit.Path = v
 	}
 	c.Server.SlowQueryThreshold = t.GetDuration("server.slow-query-threshold", c.Server.SlowQueryThreshold)
+	c.Server.QueryTimeout = t.GetDuration("server.query-timeout", c.Server.QueryTimeout)
 
 	// Engine
 	c.Engine.MemtableSize = t.GetInt("engine.memtable-size", c.Engine.MemtableSize)
@@ -186,6 +232,22 @@ func (c *Config) applyTOML(t TOMLConfig) {
 	}
 	c.Sharding.AutoSplit = t.GetBool("sharding.auto-split", c.Sharding.AutoSplit)
 	c.Sharding.BalancerOn = t.GetBool("sharding.balancer-on", c.Sharding.BalancerOn)
+
+	// Rate Limiting
+	c.Server.RateLimit.Enabled = t.GetBool("server.rate-limit.enabled", c.Server.RateLimit.Enabled)
+	c.Server.RateLimit.RequestsPerSecond = t.GetFloat("server.rate-limit.requests-per-second", c.Server.RateLimit.RequestsPerSecond)
+	c.Server.RateLimit.Burst = t.GetInt("server.rate-limit.burst", c.Server.RateLimit.Burst)
+	c.Server.RateLimit.PerConnection = t.GetBool("server.rate-limit.per-connection", c.Server.RateLimit.PerConnection)
+	c.Server.RateLimit.GlobalRate = t.GetFloat("server.rate-limit.global-rate", c.Server.RateLimit.GlobalRate)
+	c.Server.RateLimit.GlobalBurst = t.GetInt("server.rate-limit.global-burst", c.Server.RateLimit.GlobalBurst)
+	c.Server.RateLimit.WaitTimeout = t.GetDuration("server.rate-limit.wait-timeout", c.Server.RateLimit.WaitTimeout)
+
+	// Circuit Breaker
+	c.Server.CircuitBreaker.Enabled = t.GetBool("server.circuit-breaker.enabled", c.Server.CircuitBreaker.Enabled)
+	c.Server.CircuitBreaker.FailureThreshold = uint32(t.GetInt("server.circuit-breaker.failure-threshold", int(c.Server.CircuitBreaker.FailureThreshold)))
+	c.Server.CircuitBreaker.SuccessThreshold = uint32(t.GetInt("server.circuit-breaker.success-threshold", int(c.Server.CircuitBreaker.SuccessThreshold)))
+	c.Server.CircuitBreaker.Timeout = t.GetDuration("server.circuit-breaker.timeout", c.Server.CircuitBreaker.Timeout)
+	c.Server.CircuitBreaker.MaxRequests = uint32(t.GetInt("server.circuit-breaker.max-requests", int(c.Server.CircuitBreaker.MaxRequests)))
 }
 
 // ApplyFlags overrides config values from CLI flags.
@@ -287,6 +349,11 @@ func (c *Config) ApplyEnv() {
 	if v := env("MAMMOTH_AUDIT_PATH"); v != "" {
 		c.Server.Audit.Path = v
 	}
+	if v := env("MAMMOTH_QUERY_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			c.Server.QueryTimeout = d
+		}
+	}
 	if v := env("MAMMOTH_ENCRYPTION_ENABLED"); v != "" {
 		c.Engine.Encryption.Enabled = strings.EqualFold(v, "true") || v == "1"
 	}
@@ -298,6 +365,60 @@ func (c *Config) ApplyEnv() {
 	}
 	if v := env("MAMMOTH_SHARDING_CONFIG_SERVER"); v != "" {
 		c.Sharding.ConfigServer = v
+	}
+	if v := env("MAMMOTH_RATE_LIMIT_ENABLED"); v != "" {
+		c.Server.RateLimit.Enabled = strings.EqualFold(v, "true") || v == "1"
+	}
+	if v := env("MAMMOTH_RATE_LIMIT_RPS"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			c.Server.RateLimit.RequestsPerSecond = f
+		}
+	}
+	if v := env("MAMMOTH_RATE_LIMIT_BURST"); v != "" {
+		if n, err := parseInt(v); err == nil {
+			c.Server.RateLimit.Burst = n
+		}
+	}
+	if v := env("MAMMOTH_RATE_LIMIT_PER_CONNECTION"); v != "" {
+		c.Server.RateLimit.PerConnection = strings.EqualFold(v, "true") || v == "1"
+	}
+	if v := env("MAMMOTH_RATE_LIMIT_GLOBAL_RATE"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			c.Server.RateLimit.GlobalRate = f
+		}
+	}
+	if v := env("MAMMOTH_RATE_LIMIT_GLOBAL_BURST"); v != "" {
+		if n, err := parseInt(v); err == nil {
+			c.Server.RateLimit.GlobalBurst = n
+		}
+	}
+	if v := env("MAMMOTH_RATE_LIMIT_WAIT_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			c.Server.RateLimit.WaitTimeout = d
+		}
+	}
+	if v := env("MAMMOTH_CIRCUIT_BREAKER_ENABLED"); v != "" {
+		c.Server.CircuitBreaker.Enabled = strings.EqualFold(v, "true") || v == "1"
+	}
+	if v := env("MAMMOTH_CIRCUIT_BREAKER_FAILURE_THRESHOLD"); v != "" {
+		if n, err := parseInt(v); err == nil {
+			c.Server.CircuitBreaker.FailureThreshold = uint32(n)
+		}
+	}
+	if v := env("MAMMOTH_CIRCUIT_BREAKER_SUCCESS_THRESHOLD"); v != "" {
+		if n, err := parseInt(v); err == nil {
+			c.Server.CircuitBreaker.SuccessThreshold = uint32(n)
+		}
+	}
+	if v := env("MAMMOTH_CIRCUIT_BREAKER_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			c.Server.CircuitBreaker.Timeout = d
+		}
+	}
+	if v := env("MAMMOTH_CIRCUIT_BREAKER_MAX_REQUESTS"); v != "" {
+		if n, err := parseInt(v); err == nil {
+			c.Server.CircuitBreaker.MaxRequests = uint32(n)
+		}
 	}
 }
 

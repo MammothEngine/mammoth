@@ -186,3 +186,20 @@ func (c TOMLConfig) GetDuration(key string, defaultVal time.Duration) time.Durat
 	}
 	return defaultVal
 }
+
+// GetFloat returns the float value for key, or defaultVal.
+func (c TOMLConfig) GetFloat(key string, defaultVal float64) float64 {
+	v, ok := c[key]
+	if !ok {
+		return defaultVal
+	}
+	// Try parsing as float
+	if f, err := strconv.ParseFloat(v.Raw, 64); err == nil {
+		return f
+	}
+	// Try parsing as int
+	if v.Type == "int" {
+		return float64(v.Int)
+	}
+	return defaultVal
+}

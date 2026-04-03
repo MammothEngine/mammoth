@@ -86,6 +86,7 @@ func (r *ResultSet) All() ([]*bson.Document, error) {
 }
 
 // Exec executes a plan node and returns all results.
+// Respects context cancellation and timeout.
 func Exec(ctx context.Context, node PlanNode) ([]*bson.Document, error) {
 	if err := node.Open(ctx); err != nil {
 		return nil, fmt.Errorf("executor: open: %w", err)
@@ -94,6 +95,13 @@ func Exec(ctx context.Context, node PlanNode) ([]*bson.Document, error) {
 
 	var results []*bson.Document
 	for {
+		// Check context cancellation before each iteration
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
 		doc, err := node.Next()
 		if err != nil {
 			return nil, fmt.Errorf("executor: next: %w", err)
@@ -107,6 +115,7 @@ func Exec(ctx context.Context, node PlanNode) ([]*bson.Document, error) {
 }
 
 // ExecLimit executes with a limit (for memory safety).
+// Respects context cancellation and timeout.
 func ExecLimit(ctx context.Context, node PlanNode, limit int) ([]*bson.Document, error) {
 	if err := node.Open(ctx); err != nil {
 		return nil, fmt.Errorf("executor: open: %w", err)
@@ -116,6 +125,13 @@ func ExecLimit(ctx context.Context, node PlanNode, limit int) ([]*bson.Document,
 	var results []*bson.Document
 	count := 0
 	for count < limit {
+		// Check context cancellation before each iteration
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
 		doc, err := node.Next()
 		if err != nil {
 			return nil, fmt.Errorf("executor: next: %w", err)

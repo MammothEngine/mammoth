@@ -8,14 +8,12 @@ import (
 
 // RPC message types
 const (
-	MsgAppendEntries    = 1
-	MsgAppendEntriesResp = 2
-	MsgRequestVote      = 3
-	MsgRequestVoteResp  = 4
-	MsgInstallSnapshot  = 5
+	MsgAppendEntries       = 1
+	MsgAppendEntriesResp   = 2
+	MsgRequestVote         = 3
+	MsgRequestVoteResp     = 4
+	MsgInstallSnapshot     = 5
 	MsgInstallSnapshotResp = 6
-	MsgPropose          = 7
-	MsgProposeResp      = 8
 )
 
 // RPCRequest is a generic RPC request.
@@ -76,18 +74,6 @@ type InstallSnapshotRequest struct {
 // InstallSnapshotResponse is the snapshot install response.
 type InstallSnapshotResponse struct {
 	Term uint64 `json:"term"`
-}
-
-// ProposeRequest is a client proposal.
-type ProposeRequest struct {
-	Data []byte `json:"data"`
-}
-
-// ProposeResponse is the proposal response.
-type ProposeResponse struct {
-	Index uint64 `json:"index"`
-	Term  uint64 `json:"term"`
-	Ok    bool   `json:"ok"`
 }
 
 // EncodeRPC encodes an RPC request for wire transport.

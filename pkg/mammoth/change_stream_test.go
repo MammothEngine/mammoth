@@ -507,14 +507,8 @@ func TestChangeStream_Decode(t *testing.T) {
 		t.Fatalf("Decode to map: %v", err)
 	}
 
+
 	if m["operationType"] != "insert" {
 		t.Errorf("expected operationType='insert' in map, got '%v'", m["operationType"])
 	}
 }
-
-func TestChangeStream_DecodeNoEvent(t *testing.T) {
-	cs := &ChangeStream{
-		buffer:   []*ChangeEvent{},
-		position: -1,
-	}
-

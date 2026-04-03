@@ -221,12 +221,6 @@ func hashShardKey(val interface{}) uint64 {
 	return h
 }
 
-// ShardClient provides a client interface to a specific shard.
-type ShardClient struct {
-	ID     ShardID
-	Engine *engine.Engine
-}
-
 // QueryResult holds results from a shard query.
 type QueryResult struct {
 	ShardID ShardID

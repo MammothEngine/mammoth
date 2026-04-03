@@ -38,7 +38,6 @@ const (
 	typeTagArray   = 0x06
 	typeTagBinData = 0x07
 	typeTagOID     = 0x08
-	typeTagBool    = 0x09
 	typeTagDate    = 0x0A
 	typeTagRegex   = 0x0B
 	typeTagMinKey  = 0x10

@@ -46,7 +46,6 @@ func statsCmd(args []string) {
 	fmt.Println("============")
 	fmt.Printf("  Memtables: %d (%s)\n", engStats.MemtableCount, formatSize(int64(engStats.MemtableSizeBytes)))
 	fmt.Printf("  SSTables:  %d (%s)\n", engStats.SSTableCount, formatSize(int64(engStats.SSTableTotalBytes)))
-	fmt.Printf("  WAL segments: %d\n", engStats.WALSegments)
 	fmt.Printf("  Compactions: %d\n", engStats.CompactionCount)
 	fmt.Printf("  Sequence: %d\n", engStats.SequenceNumber)
 	fmt.Printf("  Operations: puts=%d gets=%d deletes=%d scans=%d\n",

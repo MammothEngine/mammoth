@@ -1,7 +1,6 @@
 package wire
 
 import (
-	"encoding/base64"
 	"strings"
 
 	"github.com/mammothengine/mammoth/pkg/auth"
@@ -135,11 +134,3 @@ func (h *Handler) handleUsersInfo(body *bson.Document) *bson.Document {
 	return doc
 }
 
-// decodeSASLData decodes base64 SASL data.
-func decodeSASLData(data string) string {
-	decoded, err := base64.StdEncoding.DecodeString(data)
-	if err != nil {
-		return data
-	}
-	return string(decoded)
-}

@@ -527,8 +527,3 @@ func extractBoundingBox(geomDoc *bson.Document) *geoBBox {
 	return &geoBBox{MinLon: minLon, MaxLon: maxLon, MinLat: minLat, MaxLat: maxLat}
 }
 
-// pointInBBox checks if a point is inside a bounding box.
-func pointInBBox(lon, lat float64, bbox *geoBBox) bool {
-	return lon >= bbox.MinLon && lon <= bbox.MaxLon &&
-		lat >= bbox.MinLat && lat <= bbox.MaxLat
-}

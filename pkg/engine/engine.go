@@ -198,7 +198,6 @@ type EngineStats struct {
 	MemtableSizeBytes int64
 	SSTableCount      int
 	SSTableTotalBytes uint64
-	WALSegments       int
 	CompactionCount   uint64
 	SequenceNumber    uint64
 	PutCount          uint64

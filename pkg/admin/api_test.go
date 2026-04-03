@@ -582,3 +582,77 @@ func TestIntParam(t *testing.T) {
 		t.Fatalf("list docs = %d, want 200: %s", w.Code, w.Body.String())
 	}
 }
+
+// --- Health Check Tests ---
+
+func TestHealthEndpoint(t *testing.T) {
+	h, cleanup := setupTestHandler(t)
+	defer cleanup()
+
+	w := doReq(t, h, "GET", "/health", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("health = %d, want 200: %s", w.Code, w.Body.String())
+	}
+
+	resp := decodeResp(t, w)
+	if resp["ok"] != true {
+		t.Errorf("ok = %v, want true", resp["ok"])
+	}
+
+	data := resp["data"].(map[string]any)
+	if data["status"] != "healthy" {
+		t.Errorf("status = %v, want healthy", data["status"])
+	}
+	if data["version"] == "" {
+		t.Error("version is empty")
+	}
+	if data["uptime"] == "" {
+		t.Error("uptime is empty")
+	}
+}
+
+func TestReadyEndpoint(t *testing.T) {
+	h, cleanup := setupTestHandler(t)
+	defer cleanup()
+
+	w := doReq(t, h, "GET", "/ready", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("ready = %d, want 200: %s", w.Code, w.Body.String())
+	}
+
+	resp := decodeResp(t, w)
+	if resp["ready"] != true {
+		t.Errorf("ready = %v, want true", resp["ready"])
+	}
+
+	checks := resp["checks"].(map[string]any)
+	if checks["engine"] != "ok" {
+		t.Errorf("engine check = %v, want ok", checks["engine"])
+	}
+	if checks["catalog"] != "ok" {
+		t.Errorf("catalog check = %v, want ok", checks["catalog"])
+	}
+}
+
+func TestLiveEndpoint(t *testing.T) {
+	h, cleanup := setupTestHandler(t)
+	defer cleanup()
+
+	w := doReq(t, h, "GET", "/live", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("live = %d, want 200: %s", w.Code, w.Body.String())
+	}
+
+	resp := decodeResp(t, w)
+	if resp["ok"] != true {
+		t.Errorf("ok = %v, want true", resp["ok"])
+	}
+
+	data := resp["data"].(map[string]any)
+	if data["alive"] != true {
+		t.Errorf("alive = %v, want true", data["alive"])
+	}
+	if data["timestamp"] == "" {
+		t.Error("timestamp is empty")
+	}
+}

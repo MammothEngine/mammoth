@@ -1,6 +1,8 @@
 package wire
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -8,10 +10,12 @@ import (
 	"github.com/mammothengine/mammoth/pkg/audit"
 	"github.com/mammothengine/mammoth/pkg/auth"
 	"github.com/mammothengine/mammoth/pkg/bson"
+	"github.com/mammothengine/mammoth/pkg/circuitbreaker"
 	"github.com/mammothengine/mammoth/pkg/engine"
 	"github.com/mammothengine/mammoth/pkg/logging"
 	"github.com/mammothengine/mammoth/pkg/metrics"
 	"github.com/mammothengine/mammoth/pkg/mongo"
+	"github.com/mammothengine/mammoth/pkg/ratelimit"
 )
 
 // MongoDB error codes
@@ -52,6 +56,8 @@ type Handler struct {
 	changeStreamMgr  *mongo.ChangeStreamManager
 	opTracker        *opTracker
 	sessionMgr       *SessionManager
+	rateLimiter      *ratelimit.Manager
+	circuitBreaker   *circuitbreaker.Manager
 }
 
 // NewHandler creates a new command handler.
@@ -144,6 +150,18 @@ func (h *Handler) WithAudit(a *audit.AuditLogger) *Handler {
 	return h
 }
 
+// WithRateLimiter sets the rate limiter manager.
+func (h *Handler) WithRateLimiter(rm *ratelimit.Manager) *Handler {
+	h.rateLimiter = rm
+	return h
+}
+
+// WithCircuitBreaker sets the circuit breaker manager.
+func (h *Handler) WithCircuitBreaker(cb *circuitbreaker.Manager) *Handler {
+	h.circuitBreaker = cb
+	return h
+}
+
 // SetConnCountFn sets the function to get current connection count.
 func (h *Handler) SetConnCountFn(fn func() int64) {
 	h.connCountFn = fn
@@ -161,6 +179,11 @@ func (h *Handler) Close() {
 
 // Handle processes an incoming message and returns a response document.
 func (h *Handler) Handle(msg *Message) *bson.Document {
+	return h.HandleWithContext(context.Background(), msg)
+}
+
+// HandleWithContext processes a message with context (supports timeout/cancellation).
+func (h *Handler) HandleWithContext(ctx context.Context, msg *Message) *bson.Document {
 	cmd := msg.Command()
 	body := msg.Body()
 
@@ -169,6 +192,18 @@ func (h *Handler) Handle(msg *Message) *bson.Document {
 	}
 
 	h.log.Debug("command", logging.FString("cmd", cmd), logging.FString("remote", msg.RemoteAddr))
+
+	// Setup request context with correlation and request IDs
+	if logging.GetCorrelationID(ctx) == "" {
+		ctx = logging.WithCorrelationID(ctx, "")
+	}
+	if logging.GetRequestID(ctx) == "" {
+		ctx = logging.WithRequestID(ctx, "")
+	}
+
+	// Create a logger with request context
+	reqLog := logging.LoggerWithContext(h.log, ctx)
+	reqLog.Debug("command", logging.FString("cmd", cmd), logging.FString("remote", msg.RemoteAddr))
 
 	start := time.Now()
 
@@ -187,100 +222,29 @@ func (h *Handler) Handle(msg *Message) *bson.Document {
 		}
 	}
 
+	// Rate limiting check
+	if h.rateLimiter != nil && !h.rateLimiter.Allow(msg.ConnID) {
+		return errResponseWithCode(cmd, "rate limit exceeded", 16500) // ExceededTimeLimit error code
+	}
+
+	// Circuit breaker check
 	var response *bson.Document
-	switch cmd {
-	case "hello", "isMaster", "ismaster":
-		response = h.handleHello()
-	case "ping":
-		response = h.handlePing()
-	case "buildInfo", "buildinfo":
-		response = h.handleBuildInfo()
-	case "whatsmyuri":
-		response = h.handleWhatsmyuri(msg)
-	case "getCmdLineOpts":
-		response = h.handleGetCmdLineOpts()
-	case "listDatabases":
-		response = h.handleListDatabases()
-	case "listCollections":
-		response = h.handleListCollections(body)
-	case "create":
-		response = h.handleCreate(body)
-	case "drop":
-		response = h.handleDrop(body)
-	case "collMod":
-		response = h.handleCollMod(body)
-	case "find":
-		response = h.handleFind(body)
-	case "insert":
-		response = h.handleInsert(body)
-	case "update":
-		response = h.handleUpdate(body)
-	case "delete":
-		response = h.handleDelete(body)
-	case "getMore":
-		response = h.handleGetMore(body)
-	case "killCursors":
-		response = h.handleKillCursors(body)
-	case "createIndexes":
-		response = h.handleCreateIndexes(body)
-	case "dropIndexes":
-		response = h.handleDropIndexes(body)
-	case "listIndexes":
-		response = h.handleListIndexes(body)
-	case "serverStatus":
-		response = h.handleServerStatus()
-	case "startSession":
-		response = h.handleStartSession()
-	case "startTransaction":
-		response = h.handleStartTransaction(body, msg.ConnID)
-	case "commitTransaction":
-		response = h.handleCommitTransaction(msg.ConnID)
-	case "abortTransaction":
-		response = h.handleAbortTransaction(msg.ConnID)
-	case "endSessions":
-		response = okDoc()
-	case "connectionStatus":
-		response = h.handleConnectionStatus(msg.ConnID)
-	case "dropDatabase":
-		response = h.handleDropDatabase(body)
-	case "aggregate":
-		response = h.handleAggregate(body)
-	case "count":
-		response = h.handleCount(body)
-	case "findAndModify":
-		response = h.handleFindAndModify(body)
-	case "distinct":
-		response = h.handleDistinct(body)
-	case "explain":
-		response = h.handleExplain(body)
-	case "currentOp":
-		response = h.handleCurrentOp(body)
-	case "killOp":
-		response = h.handleKillOp(body)
-	case "collStats":
-		response = h.handleCollStats(body)
-	case "dbStats":
-		response = h.handleDbStats(body)
-	case "saslStart":
-		response = h.handleSaslStart(body, msg.ConnID)
-	case "saslContinue":
-		response = h.handleSaslContinue(body, msg.ConnID)
-	case "createUser":
-		response = h.handleCreateUser(body)
-	case "dropUser":
-		response = h.handleDropUser(body)
-	case "usersInfo":
-		response = h.handleUsersInfo(body)
-	case "createRole":
-		response = h.handleCreateRole(body)
-	case "updateRole":
-		response = h.handleUpdateRole(body)
-	case "dropRole":
-		response = h.handleDropRole(body)
-	case "rolesInfo":
-		response = h.handleRolesInfo(body)
-	default:
-		response = errResponseWithCode(cmd, "unknown command", CodeCommandNotFound)
+	if h.circuitBreaker != nil {
+		err := h.circuitBreaker.ExecuteContext(ctx, "wire", func() error {
+			response = h.executeCommand(ctx, cmd, body, msg)
+			if ok, _ := response.Get("ok"); ok.Type == bson.TypeDouble && ok.Double() == 0 {
+				if errmsg, ok := response.Get("errmsg"); ok && errmsg.Type == bson.TypeString {
+					return errors.New(errmsg.String())
+				}
+				return errors.New("command failed")
+			}
+			return nil
+		})
+		if err == circuitbreaker.ErrCircuitOpen {
+			return errResponseWithCode(cmd, "service temporarily unavailable", 89) // NetworkTimeout error code
+		}
+	} else {
+		response = h.executeCommand(ctx, cmd, body, msg)
 	}
 
 	// Record metrics
@@ -311,6 +275,104 @@ func (h *Handler) Handle(msg *Message) *bson.Document {
 	}
 
 	return response
+}
+
+// executeCommand executes a single command and returns the response.
+func (h *Handler) executeCommand(ctx context.Context, cmd string, body *bson.Document, msg *Message) *bson.Document {
+	switch cmd {
+	case "hello", "isMaster", "ismaster":
+		return h.handleHello()
+	case "ping":
+		return h.handlePing()
+	case "buildInfo", "buildinfo":
+		return h.handleBuildInfo()
+	case "whatsmyuri":
+		return h.handleWhatsmyuri(msg)
+	case "getCmdLineOpts":
+		return h.handleGetCmdLineOpts()
+	case "listDatabases":
+		return h.handleListDatabases()
+	case "listCollections":
+		return h.handleListCollections(body)
+	case "create":
+		return h.handleCreate(body)
+	case "drop":
+		return h.handleDrop(body)
+	case "collMod":
+		return h.handleCollMod(body)
+	case "find":
+		return h.handleFind(body)
+	case "insert":
+		return h.handleInsert(body)
+	case "update":
+		return h.handleUpdate(body)
+	case "delete":
+		return h.handleDelete(body)
+	case "getMore":
+		return h.handleGetMore(body)
+	case "killCursors":
+		return h.handleKillCursors(body)
+	case "createIndexes":
+		return h.handleCreateIndexes(body)
+	case "dropIndexes":
+		return h.handleDropIndexes(body)
+	case "listIndexes":
+		return h.handleListIndexes(body)
+	case "serverStatus":
+		return h.handleServerStatus()
+	case "startSession":
+		return h.handleStartSession()
+	case "startTransaction":
+		return h.handleStartTransaction(body, msg.ConnID)
+	case "commitTransaction":
+		return h.handleCommitTransaction(msg.ConnID)
+	case "abortTransaction":
+		return h.handleAbortTransaction(msg.ConnID)
+	case "endSessions":
+		return okDoc()
+	case "connectionStatus":
+		return h.handleConnectionStatus(msg.ConnID)
+	case "dropDatabase":
+		return h.handleDropDatabase(body)
+	case "aggregate":
+		return h.handleAggregate(body)
+	case "count":
+		return h.handleCount(body)
+	case "findAndModify":
+		return h.handleFindAndModify(body)
+	case "distinct":
+		return h.handleDistinct(body)
+	case "explain":
+		return h.handleExplain(body)
+	case "currentOp":
+		return h.handleCurrentOp(body)
+	case "killOp":
+		return h.handleKillOp(body)
+	case "collStats":
+		return h.handleCollStats(body)
+	case "dbStats":
+		return h.handleDbStats(body)
+	case "saslStart":
+		return h.handleSaslStart(body, msg.ConnID)
+	case "saslContinue":
+		return h.handleSaslContinue(body, msg.ConnID)
+	case "createUser":
+		return h.handleCreateUser(body)
+	case "dropUser":
+		return h.handleDropUser(body)
+	case "usersInfo":
+		return h.handleUsersInfo(body)
+	case "createRole":
+		return h.handleCreateRole(body)
+	case "updateRole":
+		return h.handleUpdateRole(body)
+	case "dropRole":
+		return h.handleDropRole(body)
+	case "rolesInfo":
+		return h.handleRolesInfo(body)
+	default:
+		return errResponseWithCode(cmd, "unknown command", CodeCommandNotFound)
+	}
 }
 
 // --- Helper methods ---

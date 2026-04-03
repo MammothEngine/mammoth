@@ -1,8 +1,6 @@
 package engine
 
 import (
-	"time"
-
 	"github.com/mammothengine/mammoth/pkg/engine/cache"
 	"github.com/mammothengine/mammoth/pkg/engine/compression"
 	"github.com/mammothengine/mammoth/pkg/engine/wal"
@@ -27,9 +25,6 @@ type Options struct {
 
 	// Compaction options
 	L0CompactionTrigger int // Number of L0 files to trigger compaction (default: 4)
-
-	// Background sync
-	SyncInterval time.Duration
 }
 
 // DefaultOptions returns sensible defaults.

@@ -1,0 +1,70 @@
+# Mammoth Engine Production Configuration Example
+# This file shows all available configuration options with their default values.
+# Copy this file to config.toml and modify as needed.
+
+[server]
+port = 27017              # MongoDB wire protocol port
+bind = "0.0.0.0"          # Bind address
+data-dir = "./data"       # Data directory
+log-level = "info"        # Log level: debug, info, warn, error
+query-timeout = "30s"     # Default query timeout (0 = no timeout)
+
+[server.tls]
+cert-file = ""            # TLS certificate file (optional)
+key-file = ""             # TLS private key file (optional)
+
+[server.admin]
+port = 8080               # Admin UI HTTP port
+
+[server.metrics]
+port = 9100               # Prometheus metrics HTTP port
+
+[server.auth]
+enabled = false           # Enable authentication
+
+[server.audit]
+enabled = false           # Enable audit logging
+path = "./audit.log"      # Audit log file path
+
+[server.slow-query-threshold]
+value = "100ms"           # Slow query threshold
+
+[server.rate-limit]
+enabled = false                    # Enable rate limiting
+requests-per-second = 1000.0       # Per-connection rate limit
+burst = 100                        # Per-connection burst size
+per-connection = true              # Enable per-connection limiting
+global-rate = 10000.0              # Global rate limit across all connections
+global-burst = 1000                # Global burst size
+wait-timeout = "100ms"             # Max time to wait for a token
+
+[server.circuit-breaker]
+enabled = false                    # Enable circuit breaker
+failure-threshold = 5              # Failures before opening circuit
+success-threshold = 3              # Successes needed to close circuit
+timeout = "30s"                    # Timeout before trying half-open
+max-requests = 1                   # Max requests in half-open state
+
+[engine]
+memtable-size = 67108864      # 64MB memtable size
+cache-size = 134217728        # 128MB cache size
+compaction-threads = 2        # Number of compaction threads
+wal-sync-mode = "full"        # WAL sync mode: full, async, off
+
+[engine.encryption]
+enabled = false               # Enable encryption at rest
+key-file = ""                 # Path to encryption key file
+key-env = ""                  # Environment variable containing key
+
+[engine.slow-query-threshold]
+value = "100ms"
+
+[replication]
+enabled = false
+node-id = 0
+
+[sharding]
+enabled = false
+config-server = ""            # Config server address
+auto-split = true
+balancer-on = true

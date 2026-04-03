@@ -26,7 +26,6 @@ func compactCmd(args []string) {
 	fmt.Printf("Before compaction:\n")
 	fmt.Printf("  Memtables: %d (%d bytes)\n", stats.MemtableCount, stats.MemtableSizeBytes)
 	fmt.Printf("  SSTables:  %d (%d bytes)\n", stats.SSTableCount, stats.SSTableTotalBytes)
-	fmt.Printf("  WAL segments: %d\n", stats.WALSegments)
 
 	if *force || stats.MemtableCount > 2 || stats.SSTableCount > 4 {
 		fmt.Println("Running compaction...")
@@ -44,6 +43,5 @@ func compactCmd(args []string) {
 	fmt.Printf("After compaction:\n")
 	fmt.Printf("  Memtables: %d (%d bytes)\n", stats.MemtableCount, stats.MemtableSizeBytes)
 	fmt.Printf("  SSTables:  %d (%d bytes)\n", stats.SSTableCount, stats.SSTableTotalBytes)
-	fmt.Printf("  WAL segments: %d\n", stats.WALSegments)
 	fmt.Println("Compaction complete.")
 }

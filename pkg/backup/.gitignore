@@ -1,0 +1,5 @@
+# Test artifacts
+testdb/
+*.bson
+*.bson.gz
+*.json

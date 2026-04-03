@@ -67,6 +67,11 @@ func (h *APIHandler) registerRoutes() {
 	r.Handle("GET", "/api/v1/users", h.handleListUsers)
 	r.Handle("POST", "/api/v1/users", h.handleCreateUser)
 	r.Handle("DELETE", "/api/v1/users/:username", h.handleDeleteUser)
+
+	// Health checks
+	r.Handle("GET", "/health", h.handleHealth)
+	r.Handle("GET", "/ready", h.handleReady)
+	r.Handle("GET", "/live", h.handleLive)
 }
 
 // ServeHTTP routes requests to API or static files.
@@ -80,8 +85,11 @@ func (h *APIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// API routes
-	if strings.HasPrefix(r.URL.Path, "/api/v1") {
+	// API routes (including health checks)
+	if strings.HasPrefix(r.URL.Path, "/api/v1") ||
+		strings.HasPrefix(r.URL.Path, "/health") ||
+		strings.HasPrefix(r.URL.Path, "/ready") ||
+		strings.HasPrefix(r.URL.Path, "/live") {
 		h.router.ServeHTTP(w, r)
 		return
 	}
@@ -102,7 +110,6 @@ func (h *APIHandler) handleStatus(w http.ResponseWriter, r *http.Request, _ map[
 			"memtableSize":   stats.MemtableSizeBytes,
 			"sstables":       stats.SSTableCount,
 			"sstableSize":    stats.SSTableTotalBytes,
-			"walSegments":    stats.WALSegments,
 			"compactions":    stats.CompactionCount,
 			"sequenceNumber": stats.SequenceNumber,
 		},
@@ -434,4 +441,70 @@ var serveStaticFn = defaultServeStatic
 func defaultServeStatic(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write([]byte("<h1>Admin UI</h1><p>Static files not embedded.</p>"))
+}
+
+// --- Health Checks ---
+
+// handleHealth returns general health status.
+func (h *APIHandler) handleHealth(w http.ResponseWriter, r *http.Request, _ map[string]string) {
+	status := map[string]any{
+		"status":    "healthy",
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+		"version":   h.version,
+		"uptime":    time.Since(h.started).String(),
+	}
+
+	// Check engine health
+	if h.engine != nil {
+		stats := h.engine.Stats()
+		status["engine"] = map[string]any{
+			"healthy":        true,
+			"memtables":      stats.MemtableCount,
+			"sstables":       stats.SSTableCount,
+		}
+	}
+
+	writeOK(w, status)
+}
+
+// handleReady returns readiness status (can accept traffic).
+func (h *APIHandler) handleReady(w http.ResponseWriter, r *http.Request, _ map[string]string) {
+	ready := true
+	checks := make(map[string]any)
+
+	// Check if engine is available
+	if h.engine == nil {
+		ready = false
+		checks["engine"] = "not initialized"
+	} else {
+		checks["engine"] = "ok"
+	}
+
+	// Check if catalog is available
+	if h.cat == nil {
+		ready = false
+		checks["catalog"] = "not initialized"
+	} else {
+		checks["catalog"] = "ok"
+	}
+
+	status := http.StatusOK
+	if !ready {
+		status = http.StatusServiceUnavailable
+	}
+
+	writeJSON(w, status, map[string]any{
+		"ready":   ready,
+		"checks":  checks,
+		"version": h.version,
+	})
+}
+
+// handleLive returns liveness status (is the process running).
+func (h *APIHandler) handleLive(w http.ResponseWriter, r *http.Request, _ map[string]string) {
+	// Simple liveness check - if we can respond, we're alive
+	writeOK(w, map[string]any{
+		"alive":     true,
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	})
 }

@@ -11,22 +11,6 @@ import (
 
 const geoIndexPrefix = "\x00geo"
 
-// GeoJSON represents a GeoJSON geometry.
-type GeoJSON struct {
-	Type        GeoJSONType
-	Coordinates interface{}
-}
-
-// GeoJSONType represents a GeoJSON geometry type.
-type GeoJSONType string
-
-const (
-	GeoPoint       GeoJSONType = "Point"
-	GeoLineString  GeoJSONType = "LineString"
-	GeoPolygon     GeoJSONType = "Polygon"
-	GeoMultiPoint  GeoJSONType = "MultiPoint"
-)
-
 // GeoPoint2D is a simple longitude/latitude pair.
 type GeoPoint2D struct {
 	Lon float64

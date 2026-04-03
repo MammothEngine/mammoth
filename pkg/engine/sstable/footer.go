@@ -3,9 +3,8 @@ package sstable
 import "encoding/binary"
 
 const (
-	footerSize     = 48
-	magicNumber    = 0x4D414D4D // "MAMM"
-	magicBytesSize = 4
+	footerSize  = 48
+	magicNumber = 0x4D414D4D // "MAMM"
 )
 
 // Footer holds SSTable metadata stored at the end of the file.
@@ -52,8 +51,4 @@ func DecodeFooter(data []byte) (Footer, error) {
 		MetaOffset:  binary.LittleEndian.Uint64(data[32:]),
 	}
 	return f, nil
-}
-
-func init() {
-	_ = magicBytesSize
 }

@@ -309,7 +309,7 @@ func TestSkipNode(t *testing.T) {
 
 	ctx := context.Background()
 	scan := NewCollScanNode(eng, db, coll)
-	skipNode, err := NewSkipNode(scan, 5)
+	skipNode, err := NewLimitSkipNode(scan, 100, 5)
 	if err != nil {
 		t.Fatalf("create skip: %v", err)
 	}
@@ -774,18 +774,18 @@ func TestSkipNode_ExplainAndStats(t *testing.T) {
 	}
 
 	scan := NewCollScanNode(eng, db, coll)
-	skipNode, err := NewSkipNode(scan, 3)
+	skipNode, err := NewLimitSkipNode(scan, 100, 3)
 	if err != nil {
 		t.Fatalf("create skip: %v", err)
 	}
 
 	// Test Explain
 	explain := skipNode.Explain()
-	if explain.NodeType != "SKIP" {
+	if explain.NodeType != "LIMIT_SKIP" {
 		t.Errorf("Explain NodeType = %s, want SKIP", explain.NodeType)
 	}
-	if skip, ok := explain.Details["skip"].(int64); !ok || skip != 3 {
-		t.Errorf("Explain skip = %v, want 3", explain.Details["skip"])
+	if skip, ok := explain.Details["offset"].(int64); !ok || skip != 3 {
+		t.Errorf("Explain skip = %v, want 3", explain.Details["offset"])
 	}
 
 	// Execute and check stats
@@ -811,7 +811,7 @@ func TestSkipNode_ExplainAndStats(t *testing.T) {
 // Test SkipNode error cases
 func TestSkipNode_Errors(t *testing.T) {
 	scan := NewEmptyScanNode()
-	_, err := NewSkipNode(scan, -1)
+	_, err := NewLimitSkipNode(scan, 100, -1)
 	if err == nil {
 		t.Error("NewSkipNode with negative skip should error")
 	}

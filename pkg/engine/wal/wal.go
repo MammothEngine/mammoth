@@ -45,9 +45,7 @@ type WAL struct {
 	active   *Segment
 	seqNum   atomic.Uint64
 	closed   bool
-
-	batchDone chan struct{}
-	closeCh   chan struct{}
+	closeCh  chan struct{}
 }
 
 // Open opens or creates a WAL in the given directory.
@@ -59,8 +57,7 @@ func Open(opts Options) (*WAL, error) {
 	w := &WAL{
 		opts:    opts,
 		dir:     opts.Dir,
-		batchDone: make(chan struct{}),
-		closeCh:  make(chan struct{}),
+		closeCh: make(chan struct{}),
 	}
 
 	// Find existing segments

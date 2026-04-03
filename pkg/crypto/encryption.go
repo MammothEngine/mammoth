@@ -16,10 +16,6 @@ var (
 	ErrInvalidKey = errors.New("crypto: invalid encryption key")
 	// ErrDecryptionFailed is returned when decryption fails
 	ErrDecryptionFailed = errors.New("crypto: decryption failed")
-	// ErrAlreadyEncrypted is returned when data is already encrypted
-	ErrAlreadyEncrypted = errors.New("crypto: data already encrypted")
-	// ErrNotEncrypted is returned when data is not encrypted
-	ErrNotEncrypted = errors.New("crypto: data not encrypted")
 )
 
 // EncryptionConfig configures the encryption provider.

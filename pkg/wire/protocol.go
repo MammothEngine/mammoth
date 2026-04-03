@@ -4,12 +4,7 @@ import "github.com/mammothengine/mammoth/pkg/bson"
 
 const (
 	// OpCode constants
-	OpReply   uint32 = 1
-	OpUpdate  uint32 = 2001
-	OpInsert  uint32 = 2002
-	OpQuery   uint32 = 2004
-	OpGetMore uint32 = 2005
-	OpMsg     uint32 = 2013
+	OpMsg uint32 = 2013
 )
 
 const headerSize = 16

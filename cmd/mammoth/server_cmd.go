@@ -16,6 +16,7 @@ import (
 	"github.com/mammothengine/mammoth/pkg/logging"
 	"github.com/mammothengine/mammoth/pkg/metrics"
 	"github.com/mammothengine/mammoth/pkg/mongo"
+	"github.com/mammothengine/mammoth/pkg/ratelimit"
 	"github.com/mammothengine/mammoth/pkg/wire"
 )
 
@@ -86,6 +87,18 @@ func serveCmd(args []string) {
 
 	// Create wire handler
 	handler := wire.NewHandler(eng, cat, authMgr)
+
+	// Setup rate limiting
+	rateLimitMgr := ratelimit.NewManager(ratelimit.Config{
+		Enabled:           cfg.Server.RateLimit.Enabled,
+		RequestsPerSecond: cfg.Server.RateLimit.RequestsPerSecond,
+		Burst:             cfg.Server.RateLimit.Burst,
+		PerConnection:     cfg.Server.RateLimit.PerConnection,
+		GlobalRate:        cfg.Server.RateLimit.GlobalRate,
+		GlobalBurst:       cfg.Server.RateLimit.GlobalBurst,
+		WaitTimeout:       cfg.Server.RateLimit.WaitTimeout,
+	})
+	handler.WithRateLimiter(rateLimitMgr)
 
 	// Setup metrics
 	metricsReg := metrics.NewRegistry()
