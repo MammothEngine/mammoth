@@ -393,3 +393,113 @@ func TestBreaker_HalfOpenMaxRequests(t *testing.T) {
 		t.Error("expected third request to be denied")
 	}
 }
+
+// Benchmarks
+
+func BenchmarkBreaker_Allow(b *testing.B) {
+	config := DefaultConfig()
+	cb := New(config)
+
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			cb.Allow()
+		}
+	})
+}
+
+func BenchmarkBreaker_Execute(b *testing.B) {
+	config := DefaultConfig()
+	cb := New(config)
+
+	fn := func() error { return nil }
+
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			cb.Execute(fn)
+		}
+	})
+}
+
+func BenchmarkBreaker_RecordFailure(b *testing.B) {
+	config := DefaultConfig()
+	cb := New(config)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		cb.RecordFailure()
+	}
+}
+
+func BenchmarkBreaker_RecordSuccess(b *testing.B) {
+	config := DefaultConfig()
+	cb := New(config)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		cb.RecordSuccess()
+	}
+}
+
+func BenchmarkManager_GetBreaker(b *testing.B) {
+	config := DefaultConfig()
+	m := NewManager(config)
+
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			m.GetBreaker("test")
+		}
+	})
+}
+
+func BenchmarkManager_Execute(b *testing.B) {
+	config := DefaultConfig()
+	m := NewManager(config)
+	fn := func() error { return nil }
+
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			m.Execute("test", fn)
+		}
+	})
+}
+
+func BenchmarkBreaker_ConcurrentAllow(b *testing.B) {
+	config := DefaultConfig()
+	cb := New(config)
+
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			cb.Allow()
+		}
+	})
+}
+
+func BenchmarkBreaker_ConcurrentExecute(b *testing.B) {
+	config := DefaultConfig()
+	cb := New(config)
+	fn := func() error {
+		if fastrand()%2 == 0 {
+			return errors.New("fail")
+		}
+		return nil
+	}
+
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			cb.Execute(fn)
+		}
+	})
+}
+
+var fastrandState uint32 = 1
+
+func fastrand() uint32 {
+	fastrandState = fastrandState*1103515245 + 12345
+	return fastrandState
+}

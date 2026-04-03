@@ -380,3 +380,70 @@ func BenchmarkDo(b *testing.B) {
 		})
 	}
 }
+
+func BenchmarkDoWithResult(b *testing.B) {
+	config := Config{
+		MaxRetries: 0,
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		DoWithResultAndConfig(config, func() (int, error) {
+			return 42, nil
+		})
+	}
+}
+
+func BenchmarkDoWithRetries(b *testing.B) {
+	config := Config{
+		MaxRetries: 3,
+		BaseDelay:  1 * time.Microsecond,
+		Jitter:     false,
+	}
+
+	attempts := 0
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		attempts = 0
+		DoWithConfig(config, func() error {
+			attempts++
+			if attempts < 2 {
+				return testError
+			}
+			return nil
+		})
+	}
+}
+
+func BenchmarkRetrier(b *testing.B) {
+	r := New(DefaultConfig())
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		r.Do(func() error {
+			return nil
+		})
+	}
+}
+
+func BenchmarkCalculateDelay(b *testing.B) {
+	config := Config{
+		BaseDelay:  100 * time.Millisecond,
+		MaxDelay:   30 * time.Second,
+		Multiplier: 2.0,
+		Jitter:     true,
+	}
+
+	delays := []time.Duration{
+		100 * time.Millisecond,
+		200 * time.Millisecond,
+		400 * time.Millisecond,
+		800 * time.Millisecond,
+		1600 * time.Millisecond,
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		calculateDelay(delays[i%len(delays)], config)
+	}
+}
