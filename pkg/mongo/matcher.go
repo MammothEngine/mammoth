@@ -221,8 +221,48 @@ func matchOperator(op string, opVal bson.Value, fieldVal bson.Value, fieldFound 
 		return matchGeoWithin(opVal, fieldVal, fieldFound)
 	case "$geoIntersects":
 		return matchGeoIntersects(opVal, fieldVal, fieldFound)
+	case "$mod":
+		return matchMod(opVal, fieldVal, fieldFound)
 	}
 	return true
+}
+
+// matchMod handles $mod: [divisor, remainder] - matches if field % divisor == remainder.
+func matchMod(opVal bson.Value, fieldVal bson.Value, fieldFound bool) bool {
+	if !fieldFound {
+		return false
+	}
+	if opVal.Type != bson.TypeArray {
+		return false
+	}
+	arr := opVal.ArrayValue()
+	if len(arr) != 2 {
+		return false
+	}
+
+	divisor := bsonValueToFloat64(arr[0])
+	remainder := bsonValueToFloat64(arr[1])
+	fieldNum := bsonValueToFloat64(fieldVal)
+
+	if divisor == 0 {
+		return false
+	}
+
+	return int64(fieldNum)%int64(divisor) == int64(remainder)
+}
+
+// bsonValueToFloat64 converts a bson.Value to float64.
+func bsonValueToFloat64(v bson.Value) float64 {
+	switch v.Type {
+	case bson.TypeDouble:
+		return v.Double()
+	case bson.TypeInt32:
+		return float64(v.Int32())
+	case bson.TypeInt64:
+		return float64(v.Int64())
+	default:
+		return 0
+	}
 }
 
 // ResolveField resolves a dot-notation path like "a.b.c" in a document.

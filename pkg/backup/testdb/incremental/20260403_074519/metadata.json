@@ -1,0 +1,12 @@
+{
+  "version": "1.0",
+  "created_at": "2026-04-03T07:45:19.0377258Z",
+  "format": "bson",
+  "compressed": true,
+  "database": "testdb",
+  "collections": null,
+  "oplog_start": 1775202219,
+  "oplog_end": 1775202319,
+  "incremental": true,
+  "checksum": "b519174d33ddc7433c5ba61f5e0159d4"
+}

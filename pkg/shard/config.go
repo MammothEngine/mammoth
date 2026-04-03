@@ -13,6 +13,7 @@ package shard
 
 import (
 	"fmt"
+	"sort"
 	"sync"
 
 	"github.com/mammothengine/mammoth/pkg/bson"
@@ -127,6 +128,10 @@ func (c *Config) ListShards() []*Shard {
 	for _, s := range c.shards {
 		result = append(result, s)
 	}
+	// Sort by ID for consistent ordering
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].ID < result[j].ID
+	})
 	return result
 }
 

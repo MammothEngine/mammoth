@@ -484,3 +484,253 @@ func TestRaftQuorum(t *testing.T) {
 func decodePayloadInto(data []byte, v interface{}) error {
 	return json.Unmarshal(data, v)
 }
+
+// Test Raft StepDown
+func TestRaftStepDown(t *testing.T) {
+	nodes, _ := createCluster(t, 3, 50*time.Millisecond)
+	startAll(t, nodes)
+	defer stopAll(t, nodes)
+
+	leader := waitForLeader(t, nodes, 2*time.Second)
+
+	// Step down
+	err := leader.StepDown()
+	if err != nil {
+		t.Fatalf("StepDown: %v", err)
+	}
+
+	// Should no longer be leader
+	if leader.State() == StateLeader {
+		t.Error("expected leader to step down")
+	}
+
+	// Wait for new leader
+	time.Sleep(300 * time.Millisecond)
+
+	// A new leader should be elected
+	newLeader := waitForLeader(t, nodes, 2*time.Second)
+	if newLeader.id == leader.id {
+		t.Error("expected a different leader after step down")
+	}
+}
+
+// Test Raft StepDown from non-leader fails
+func TestRaftStepDown_NotLeader(t *testing.T) {
+	nodes, _ := createCluster(t, 3, 50*time.Millisecond)
+	startAll(t, nodes)
+	defer stopAll(t, nodes)
+
+	leader := waitForLeader(t, nodes, 2*time.Second)
+
+	// Find a follower
+	var follower *Raft
+	for _, n := range nodes {
+		if n != leader {
+			follower = n
+			break
+		}
+	}
+
+	// Step down from follower should fail
+	err := follower.StepDown()
+	if err != ErrNotLeader {
+		t.Errorf("expected ErrNotLeader, got %v", err)
+	}
+}
+
+// Test Raft CreateSnapshot
+func TestRaftCreateSnapshot(t *testing.T) {
+	nodes, _ := createCluster(t, 3, 50*time.Millisecond)
+	startAll(t, nodes)
+	defer stopAll(t, nodes)
+
+	leader := waitForLeader(t, nodes, 2*time.Second)
+
+	// Propose some entries
+	for i := 0; i < 5; i++ {
+		data := []byte(fmt.Sprintf("entry_%d", i))
+		_, _, err := leader.Propose(data)
+		if err != nil {
+			t.Fatalf("Propose: %v", err)
+		}
+	}
+
+	time.Sleep(200 * time.Millisecond)
+
+	// Create snapshot
+	snap, err := leader.CreateSnapshot()
+	if err != nil {
+		t.Fatalf("CreateSnapshot: %v", err)
+	}
+
+	// Verify snapshot data
+	if snap.LastIncludedIndex == 0 {
+		t.Error("expected non-zero LastIncludedIndex")
+	}
+	if snap.LastIncludedTerm == 0 {
+		t.Error("expected non-zero LastIncludedTerm")
+	}
+	if len(snap.Data) == 0 {
+		t.Error("expected non-empty snapshot data")
+	}
+}
+
+// Test handleInstallSnapshot
+func TestRaftHandleInstallSnapshot(t *testing.T) {
+	eng := newMemEngine()
+	cfg := &ClusterConfig{
+		Nodes: []NodeConfig{
+			{ID: 1, Address: "a", Voter: true},
+			{ID: 2, Address: "b", Voter: true},
+		},
+	}
+	r := NewRaft(RaftConfig{
+		ID:              1,
+		Config:          cfg,
+		Engine:          eng,
+		Transport:       NewMemTransport(),
+		ElectionTimeout: 500 * time.Millisecond,
+	})
+
+	// Set a known term
+	r.mu.Lock()
+	r.currentTerm = 5
+	r.mu.Unlock()
+
+	// Send InstallSnapshot request
+	resp, err := r.HandleRPC(&RPCRequest{
+		Type: MsgInstallSnapshot,
+		Payload: encodePayload(&InstallSnapshotRequest{
+			Term:              5,
+			LeaderID:          2,
+			LastIncludedIndex: 10,
+			LastIncludedTerm:  3,
+			Data:              []byte("snapshot data"),
+		}),
+	})
+	if err != nil {
+		t.Fatalf("HandleRPC error: %v", err)
+	}
+
+	// Verify response
+	var isr InstallSnapshotResponse
+	if err := decodePayloadInto(resp.Payload, &isr); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if isr.Term != 5 {
+		t.Errorf("expected Term=5, got %d", isr.Term)
+	}
+}
+
+// Test RaftLogEngine and simpleBatch
+func TestRaftLogEngine_BatchOperations(t *testing.T) {
+	eng := newMemEngine()
+
+	// Create an engineAdapter to access NewBatch
+	adapter := &engineAdapter{eng}
+
+	// Test Put through batch
+	batch := adapter.NewBatch()
+	batch.Put([]byte("key1"), []byte("value1"))
+	batch.Put([]byte("key2"), []byte("value2"))
+
+	// Commit the batch
+	err := batch.Commit()
+	if err != nil {
+		t.Fatalf("Commit failed: %v", err)
+	}
+
+	// Verify values were written
+	val1, err := eng.Get([]byte("key1"))
+	if err != nil {
+		t.Fatalf("Get key1 failed: %v", err)
+	}
+	if string(val1) != "value1" {
+		t.Errorf("key1: expected 'value1', got '%s'", string(val1))
+	}
+
+	val2, err := eng.Get([]byte("key2"))
+	if err != nil {
+		t.Fatalf("Get key2 failed: %v", err)
+	}
+	if string(val2) != "value2" {
+		t.Errorf("key2: expected 'value2', got '%s'", string(val2))
+	}
+}
+
+// Test simpleBatch Delete
+func TestRaftLogEngine_BatchDelete(t *testing.T) {
+	eng := newMemEngine()
+
+	// Create an engineAdapter to access NewBatch
+	adapter := &engineAdapter{eng}
+
+	// Pre-populate data
+	eng.Put([]byte("key1"), []byte("value1"))
+	eng.Put([]byte("key2"), []byte("value2"))
+
+	// Delete through batch
+	batch := adapter.NewBatch()
+	batch.Delete([]byte("key1"))
+
+	// Commit the batch
+	err := batch.Commit()
+	if err != nil {
+		t.Fatalf("Commit failed: %v", err)
+	}
+
+	// Verify key1 was deleted
+	_, err = eng.Get([]byte("key1"))
+	if err == nil {
+		t.Error("key1 should have been deleted")
+	}
+
+	// Verify key2 still exists
+	val2, err := eng.Get([]byte("key2"))
+	if err != nil {
+		t.Fatalf("Get key2 failed: %v", err)
+	}
+	if string(val2) != "value2" {
+		t.Errorf("key2: expected 'value2', got '%s'", string(val2))
+	}
+}
+
+// Test simpleBatch mixed operations
+func TestRaftLogEngine_BatchMixed(t *testing.T) {
+	eng := newMemEngine()
+
+	// Create an engineAdapter to access NewBatch
+	adapter := &engineAdapter{eng}
+
+	// Pre-populate data
+	eng.Put([]byte("old_key"), []byte("old_value"))
+
+	// Mixed operations
+	batch := adapter.NewBatch()
+	batch.Put([]byte("new_key"), []byte("new_value"))
+	batch.Delete([]byte("old_key"))
+	batch.Put([]byte("another_key"), []byte("another_value"))
+
+	// Commit
+	err := batch.Commit()
+	if err != nil {
+		t.Fatalf("Commit failed: %v", err)
+	}
+
+	// Verify old_key deleted
+	_, err = eng.Get([]byte("old_key"))
+	if err == nil {
+		t.Error("old_key should have been deleted")
+	}
+
+	// Verify new keys exist
+	val, _ := eng.Get([]byte("new_key"))
+	if string(val) != "new_value" {
+		t.Errorf("new_key: expected 'new_value', got '%s'", string(val))
+	}
+
+	val, _ = eng.Get([]byte("another_key"))
+	if string(val) != "another_value" {
+		t.Errorf("another_key: expected 'another_value', got '%s'", string(val))
+	}
+}

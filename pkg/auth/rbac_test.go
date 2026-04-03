@@ -46,16 +46,48 @@ func TestBuiltinRoles(t *testing.T) {
 }
 
 func TestCommandToAction(t *testing.T) {
-	if CommandToAction("find") != ActionFind {
-		t.Error("find")
+	tests := []struct {
+		cmd      string
+		expected ActionType
+	}{
+		// Read operations
+		{"find", ActionFind},
+		{"count", ActionFind},
+		{"aggregate", ActionFind},
+		{"getMore", ActionFind},
+
+		// Write operations
+		{"insert", ActionInsert},
+		{"update", ActionUpdate},
+		{"delete", ActionDelete},
+
+		// Collection operations
+		{"create", ActionCreateCollection},
+		{"drop", ActionDropCollection},
+		{"dropDatabase", ActionDropCollection},
+
+		// Index operations
+		{"createIndexes", ActionCreateIndex},
+		{"dropIndexes", ActionDropIndex},
+
+		// User operations
+		{"createUser", ActionCreateUser},
+		{"dropUser", ActionDropUser},
+
+		// Role operations
+		{"createRole", ActionCreateRole},
+		{"dropRole", ActionDropRole},
+
+		// Unknown command
+		{"unknown", ActionAny},
+		{"", ActionAny},
+		{"randomCmd", ActionAny},
 	}
-	if CommandToAction("insert") != ActionInsert {
-		t.Error("insert")
-	}
-	if CommandToAction("create") != ActionCreateCollection {
-		t.Error("create")
-	}
-	if CommandToAction("unknown") != ActionAny {
-		t.Error("unknown should map to Any")
+
+	for _, tt := range tests {
+		result := CommandToAction(tt.cmd)
+		if result != tt.expected {
+			t.Errorf("CommandToAction(%q) = %v, want %v", tt.cmd, result, tt.expected)
+		}
 	}
 }

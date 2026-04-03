@@ -136,3 +136,245 @@ func TestChangeEventFromEntry(t *testing.T) {
 		}
 	}
 }
+
+func TestOpToOperationType(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"i", "insert"},
+		{"u", "update"},
+		{"d", "delete"},
+		{"x", "x"}, // unknown op
+	}
+
+	for _, tt := range tests {
+		result := opToOperationType(tt.input)
+		if result != tt.expected {
+			t.Errorf("opToOperationType(%q) = %q, want %q", tt.input, result, tt.expected)
+		}
+	}
+}
+
+func TestSplitNamespace(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected []string
+	}{
+		{"test.users", []string{"test", "users"}},
+		{"test.users.extra", []string{"test", "users.extra"}},
+		{"admin", []string{"admin"}},
+		{"", []string{""}},
+	}
+
+	for _, tt := range tests {
+		result := splitNamespace(tt.input)
+		if len(result) != len(tt.expected) {
+			t.Errorf("splitNamespace(%q) len = %d, want %d", tt.input, len(result), len(tt.expected))
+			continue
+		}
+		for i, v := range result {
+			if v != tt.expected[i] {
+				t.Errorf("splitNamespace(%q)[%d] = %q, want %q", tt.input, i, v, tt.expected[i])
+			}
+		}
+	}
+}
+
+func TestChangeEventFromEntry_Update(t *testing.T) {
+	entry := mongo.OplogEntry{
+		Timestamp: 1711807200,
+		Operation: "u",
+		Namespace: "test.users",
+		Document:  bson.Encode(bson.D("_id", bson.VInt32(1), "name", bson.VString("Bob"))),
+		WallTime:  1711807200000,
+	}
+
+	event := changeEventFromEntry(entry)
+
+	// Check operationType
+	if ot, ok := event.Get("operationType"); !ok || ot.String() != "update" {
+		t.Errorf("expected operationType=update, got %v", ot)
+	}
+}
+
+func TestChangeEventFromEntry_Delete(t *testing.T) {
+	entry := mongo.OplogEntry{
+		Timestamp: 1711807200,
+		Operation: "d",
+		Namespace: "test.users",
+		Document:  bson.Encode(bson.D("_id", bson.VInt32(1))),
+		WallTime:  1711807200000,
+	}
+
+	event := changeEventFromEntry(entry)
+
+	// Check operationType
+	if ot, ok := event.Get("operationType"); !ok || ot.String() != "delete" {
+		t.Errorf("expected operationType=delete, got %v", ot)
+	}
+
+	// For delete, documentKey should be set
+	if dk, ok := event.Get("documentKey"); !ok {
+		t.Error("expected documentKey for delete operation")
+	} else if dk.Type != bson.TypeDocument {
+		t.Errorf("expected documentKey to be document, got %v", dk.Type)
+	}
+}
+
+func TestChangeEventFromEntry_InvalidDocument(t *testing.T) {
+	entry := mongo.OplogEntry{
+		Timestamp: 1711807200,
+		Operation: "i",
+		Namespace: "test.users",
+		Document:  []byte{0xff, 0xfe}, // Invalid BSON
+		WallTime:  1711807200000,
+	}
+
+	// Should not panic
+	event := changeEventFromEntry(entry)
+
+	// Should still have basic fields
+	if ot, ok := event.Get("operationType"); !ok || ot.String() != "insert" {
+		t.Error("expected operationType=insert even with invalid document")
+	}
+}
+
+func TestChangeEventFromEntry_NoNamespaceDot(t *testing.T) {
+	entry := mongo.OplogEntry{
+		Timestamp: 1711807200,
+		Operation: "i",
+		Namespace: "admin", // No dot
+		Document:  bson.Encode(bson.D("_id", bson.VInt32(1))),
+		WallTime:  1711807200000,
+	}
+
+	event := changeEventFromEntry(entry)
+
+	// Check namespace
+	if ns, ok := event.Get("ns"); ok && ns.Type == bson.TypeDocument {
+		if db, ok2 := ns.DocumentValue().Get("db"); !ok2 || db.String() != "admin" {
+			t.Errorf("expected ns.db=admin, got %v", db)
+		}
+		// coll should not be set
+		if _, hasColl := ns.DocumentValue().Get("coll"); hasColl {
+			t.Error("expected no coll in namespace when no dot")
+		}
+	}
+}
+
+func TestHandleChangeStream_WithResumeAfter(t *testing.T) {
+	dir := t.TempDir()
+	eng, err := engine.Open(engine.DefaultOptions(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+
+	cat := mongo.NewCatalog(eng)
+	h := NewHandler(eng, cat, nil)
+	defer h.Close()
+
+	// Create stage value with resumeAfter
+	resumeDoc := bson.D("_data", bson.VInt64(1000))
+	stageDoc := bson.D("resumeAfter", bson.VDoc(resumeDoc))
+	stageVal := bson.VDoc(stageDoc)
+
+	// Call handleChangeStream (should not panic)
+	docs := h.handleChangeStream("test", "users", stageVal)
+	// Result may be empty but function should complete
+	_ = docs
+}
+
+func TestHandleChangeStream_ResumeWithInt32(t *testing.T) {
+	dir := t.TempDir()
+	eng, err := engine.Open(engine.DefaultOptions(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+
+	cat := mongo.NewCatalog(eng)
+	h := NewHandler(eng, cat, nil)
+	defer h.Close()
+
+	// Create stage value with resumeAfter using int32
+	resumeDoc := bson.D("_data", bson.VInt32(500))
+	stageDoc := bson.D("resumeAfter", bson.VDoc(resumeDoc))
+	stageVal := bson.VDoc(stageDoc)
+
+	// Call handleChangeStream (should not panic)
+	docs := h.handleChangeStream("test", "users", stageVal)
+	_ = docs
+}
+
+func TestHandleChangeStream_InvalidStageType(t *testing.T) {
+	dir := t.TempDir()
+	eng, err := engine.Open(engine.DefaultOptions(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+
+	cat := mongo.NewCatalog(eng)
+	h := NewHandler(eng, cat, nil)
+	defer h.Close()
+
+	// Call with non-document value (should not panic)
+	docs := h.handleChangeStream("test", "users", bson.VString("invalid"))
+	_ = docs
+}
+
+func TestOplogWriteInsert(t *testing.T) {
+	dir := t.TempDir()
+	eng, err := engine.Open(engine.DefaultOptions(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+
+	cat := mongo.NewCatalog(eng)
+	h := NewHandler(eng, cat, nil)
+	defer h.Close()
+
+	doc := bson.D("_id", bson.VInt32(1), "name", bson.VString("test"))
+
+	// Should not panic even without oplog
+	h.oplogWriteInsert("test", "users", doc)
+}
+
+func TestOplogWriteUpdate(t *testing.T) {
+	dir := t.TempDir()
+	eng, err := engine.Open(engine.DefaultOptions(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+
+	cat := mongo.NewCatalog(eng)
+	h := NewHandler(eng, cat, nil)
+	defer h.Close()
+
+	doc := bson.D("_id", bson.VInt32(1), "name", bson.VString("updated"))
+
+	// Should not panic even without oplog
+	h.oplogWriteUpdate("test", "users", doc)
+}
+
+func TestOplogWriteDelete(t *testing.T) {
+	dir := t.TempDir()
+	eng, err := engine.Open(engine.DefaultOptions(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+
+	cat := mongo.NewCatalog(eng)
+	h := NewHandler(eng, cat, nil)
+	defer h.Close()
+
+	doc := bson.D("_id", bson.VInt32(1))
+
+	// Should not panic even without oplog
+	h.oplogWriteDelete("test", "users", doc)
+}

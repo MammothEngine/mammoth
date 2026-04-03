@@ -2,6 +2,7 @@ package repl
 
 import (
 	"encoding/json"
+	"time"
 )
 
 // StateMachine applies committed log entries to the application state.
@@ -55,18 +56,50 @@ func (m *MammothStateMachine) Apply(entry LogEntry) error {
 	case "delete":
 		return m.engine.Delete(cmd.Key)
 	case "batch":
-		batch := m.engine.NewBatch()
 		for _, op := range cmd.Ops {
 			switch op.Op {
 			case "put":
-				batch.Put(op.Key, op.Value)
+				if err := m.engine.Put(op.Key, op.Value); err != nil {
+					return err
+				}
 			case "delete":
-				batch.Delete(op.Key)
+				if err := m.engine.Delete(op.Key); err != nil {
+					return err
+				}
 			}
 		}
-		return batch.Commit()
+		return nil
+	case "oplog":
+		// Apply oplog entry
+		var oplogCmd OplogCommand
+		if err := json.Unmarshal(cmd.Value, &oplogCmd); err != nil {
+			return err
+		}
+		return m.applyOplogCommand(oplogCmd)
 	}
 	return nil
+}
+
+// applyOplogCommand applies an oplog command to the state machine.
+func (m *MammothStateMachine) applyOplogCommand(cmd OplogCommand) error {
+	// Convert back to documents
+	obj := mapToDoc(cmd.Object)
+	obj2 := mapToDoc(cmd.Object2)
+
+	oplogEntry := &OplogEntry{
+		Timestamp: cmd.Timestamp,
+		Term:      cmd.Term,
+		Hash:      cmd.Hash,
+		Operation: cmd.Op,
+		Namespace: cmd.Namespace,
+		Object:    obj,
+		Object2:   obj2,
+		WallTime:  time.Now().UTC(),
+	}
+
+	// Apply based on operation type
+	applier := NewOplogApplier(m.engine)
+	return applier.Apply(oplogEntry)
 }
 
 // Snapshot creates a full snapshot of the engine state.
@@ -104,11 +137,20 @@ func (m *MammothStateMachine) Restore(data []byte) error {
 	}
 
 	// Restore from snapshot
-	batch := m.engine.NewBatch()
-	for _, e := range snapshot.Entries {
-		batch.Put(e.Key, e.Value)
+	if batcher, ok := m.engine.(interface{ NewBatch() interface{ Put([]byte, []byte); Delete([]byte); Commit() error } }); ok {
+		batch := batcher.NewBatch()
+		for _, e := range snapshot.Entries {
+			batch.Put(e.Key, e.Value)
+		}
+		return batch.Commit()
 	}
-	return batch.Commit()
+	// Fallback: sequential puts
+	for _, e := range snapshot.Entries {
+		if err := m.engine.Put(e.Key, e.Value); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type kvEntry struct {

@@ -449,3 +449,48 @@ func TestMatch_MissingFieldGt(t *testing.T) {
 		t.Error("$gt on missing field should not match")
 	}
 }
+
+func TestMatch_Mod(t *testing.T) {
+	doc := bson.NewDocument()
+	doc.Set("x", bson.VInt32(14))
+
+	// 14 % 7 == 0
+	filter := bson.NewDocument()
+	op := bson.NewDocument()
+	op.Set("$mod", bson.VArray(bson.A(bson.VInt32(7), bson.VInt32(0))))
+	filter.Set("x", bson.VDoc(op))
+	if !matchDoc(t, filter, doc) {
+		t.Error("$mod [7, 0] should match x=14")
+	}
+
+	// 14 % 5 == 4
+	filter2 := bson.NewDocument()
+	op2 := bson.NewDocument()
+	op2.Set("$mod", bson.VArray(bson.A(bson.VInt32(5), bson.VInt32(4))))
+	filter2.Set("x", bson.VDoc(op2))
+	if !matchDoc(t, filter2, doc) {
+		t.Error("$mod [5, 4] should match x=14 (14 % 5 = 4)")
+	}
+
+	// 14 % 5 == 3 should not match
+	filter3 := bson.NewDocument()
+	op3 := bson.NewDocument()
+	op3.Set("$mod", bson.VArray(bson.A(bson.VInt32(5), bson.VInt32(3))))
+	filter3.Set("x", bson.VDoc(op3))
+	if matchDoc(t, filter3, doc) {
+		t.Error("$mod [5, 3] should not match x=14")
+	}
+}
+
+func TestMatch_ModMissingField(t *testing.T) {
+	doc := bson.NewDocument()
+	doc.Set("x", bson.VInt32(1))
+
+	filter := bson.NewDocument()
+	op := bson.NewDocument()
+	op.Set("$mod", bson.VArray(bson.A(bson.VInt32(2), bson.VInt32(0))))
+	filter.Set("missing_field", bson.VDoc(op))
+	if matchDoc(t, filter, doc) {
+		t.Error("$mod on missing field should not match")
+	}
+}

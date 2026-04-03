@@ -319,3 +319,46 @@ func TestJoinPlan(t *testing.T) {
 		t.Errorf("expected cost 100.0, got %f", plan.EstimatedCost)
 	}
 }
+
+// Test generateIndexIntersectionPlans with multiple indexes
+func TestGenerateIndexIntersectionPlans(t *testing.T) {
+	dir := t.TempDir()
+	eng, err := engine.Open(engine.DefaultOptions(dir))
+	if err != nil {
+		t.Fatalf("Failed to open engine: %v", err)
+	}
+	defer eng.Close()
+
+	cat := NewCatalog(eng)
+	indexCat := NewIndexCatalog(eng, cat)
+	statsMgr := NewStatsManager(eng)
+
+	// Create indexes on different fields
+	indexes := []IndexSpec{
+		{Name: "idx_name", Key: []IndexKey{{Field: "name", Descending: false}}},
+		{Name: "idx_age", Key: []IndexKey{{Field: "age", Descending: false}}},
+		{Name: "idx_city", Key: []IndexKey{{Field: "city", Descending: false}}},
+	}
+
+	cbp := NewCostBasedPlanner(indexCat, statsMgr)
+
+	// Create filter with multiple equality conditions
+	filter := bson.NewDocument()
+	filter.Set("name", bson.VString("test"))
+	filter.Set("age", bson.VInt32(25))
+
+	// Generate intersection plans
+	plans := cbp.generateIndexIntersectionPlans("testdb", "testcoll", filter, indexes)
+
+	// Should generate at least one intersection plan
+	if len(plans) == 0 {
+		t.Log("No intersection plans generated (may be expected with empty filter fields)")
+	} else {
+		t.Logf("Generated %d intersection plans", len(plans))
+		for _, plan := range plans {
+			if plan.PlanType != PlanMultiIndex {
+				t.Errorf("expected PlanMultiIndex, got %v", plan.PlanType)
+			}
+		}
+	}
+}

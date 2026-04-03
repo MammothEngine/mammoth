@@ -287,3 +287,30 @@ func TestSkipListLexicographicOrdering(t *testing.T) {
 		}
 	}
 }
+
+// Test SkipList Arena() getter
+func TestSkipList_Arena(t *testing.T) {
+	sl := NewSkipList(1 << 20)
+
+	// Arena() should return the underlying arena
+	arena := sl.Arena()
+	if arena == nil {
+		t.Fatal("Arena() returned nil")
+	}
+
+	// The arena should have the expected capacity
+	if arena.Cap() != (1 << 20) {
+		t.Errorf("Arena.Cap() = %d, want %d", arena.Cap(), 1<<20)
+	}
+}
+
+// Test SkipList HeadOffset() getter
+func TestSkipList_HeadOffset(t *testing.T) {
+	sl := NewSkipList(1 << 20)
+
+	// HeadOffset() should return the head node offset
+	headOff := sl.HeadOffset()
+	// The head offset is typically 0 (first node in arena)
+	// This is used by the iterator to start traversal
+	_ = headOff
+}

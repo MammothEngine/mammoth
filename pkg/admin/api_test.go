@@ -332,3 +332,253 @@ func TestDBStatsEmptyDB(t *testing.T) {
 		t.Errorf("collections = %v, want 0", data["collections"])
 	}
 }
+
+// --- Insert Document ---
+
+func TestInsertDocument(t *testing.T) {
+	h, cleanup := setupTestHandler(t)
+	defer cleanup()
+
+	// Create collection first
+	doReq(t, h, "POST", "/api/v1/databases/test/collections", `{"name":"items"}`)
+
+	// Insert document
+	w := doReq(t, h, "POST", "/api/v1/databases/test/collections/items/documents",
+		`{"document":{"name":"test","value":42}}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("insert = %d, want 200: %s", w.Code, w.Body.String())
+	}
+
+	resp := decodeResp(t, w)
+	data := resp["data"].(map[string]any)
+	if data["inserted"] != float64(1) {
+		t.Errorf("inserted = %v, want 1", data["inserted"])
+	}
+}
+
+func TestInsertDocumentInvalidJSON(t *testing.T) {
+	h, cleanup := setupTestHandler(t)
+	defer cleanup()
+
+	doReq(t, h, "POST", "/api/v1/databases/test/collections", `{"name":"items"}`)
+
+	w := doReq(t, h, "POST", "/api/v1/databases/test/collections/items/documents", `invalid json`)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
+// --- Delete Documents ---
+
+func TestDeleteDocuments(t *testing.T) {
+	h, cleanup := setupTestHandler(t)
+	defer cleanup()
+
+	// Create collection and insert documents
+	doReq(t, h, "POST", "/api/v1/databases/test/collections", `{"name":"items"}`)
+	doReq(t, h, "POST", "/api/v1/databases/test/collections/items/documents", `{"document":{"_id":"1"}}`)
+	doReq(t, h, "POST", "/api/v1/databases/test/collections/items/documents", `{"document":{"_id":"2"}}`)
+
+	// Delete all documents (empty filter matches all in this simple implementation)
+	w := doReq(t, h, "DELETE", "/api/v1/databases/test/collections/items/documents?filter=all", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("delete = %d, want 200: %s", w.Code, w.Body.String())
+	}
+
+	resp := decodeResp(t, w)
+	data := resp["data"].(map[string]any)
+	if data["deleted"] == nil {
+		t.Error("expected deleted count")
+	}
+}
+
+func TestDeleteDocumentsNoFilter(t *testing.T) {
+	h, cleanup := setupTestHandler(t)
+	defer cleanup()
+
+	doReq(t, h, "POST", "/api/v1/databases/test/collections", `{"name":"items"}`)
+
+	w := doReq(t, h, "DELETE", "/api/v1/databases/test/collections/items/documents", "")
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
+// --- Drop Index ---
+
+func TestDropIndex(t *testing.T) {
+	h, cleanup := setupTestHandler(t)
+	defer cleanup()
+
+	// Create collection and index
+	doReq(t, h, "POST", "/api/v1/databases/test/collections", `{"name":"products"}`)
+	doReq(t, h, "POST", "/api/v1/databases/test/collections/products/indexes",
+		`{"name":"idx_name","key":[{"field":"name"}]}`)
+
+	// Drop index
+	w := doReq(t, h, "DELETE", "/api/v1/databases/test/collections/products/indexes/idx_name", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("drop index = %d, want 200: %s", w.Code, w.Body.String())
+	}
+
+	resp := decodeResp(t, w)
+	data := resp["data"].(map[string]any)
+	if data["dropped"] != "idx_name" {
+		t.Errorf("dropped = %v, want idx_name", data["dropped"])
+	}
+}
+
+func TestDropIndexNotFound(t *testing.T) {
+	h, cleanup := setupTestHandler(t)
+	defer cleanup()
+
+	doReq(t, h, "POST", "/api/v1/databases/test/collections", `{"name":"products"}`)
+
+	w := doReq(t, h, "DELETE", "/api/v1/databases/test/collections/products/indexes/nonexistent", "")
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", w.Code)
+	}
+}
+
+// --- Additional Tests for Coverage ---
+
+func TestCreateCollectionInvalidJSON(t *testing.T) {
+	h, cleanup := setupTestHandler(t)
+	defer cleanup()
+
+	w := doReq(t, h, "POST", "/api/v1/databases/test/collections", `invalid json`)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestCreateIndexInvalidJSON(t *testing.T) {
+	h, cleanup := setupTestHandler(t)
+	defer cleanup()
+
+	doReq(t, h, "POST", "/api/v1/databases/test/collections", `{"name":"products"}`)
+
+	w := doReq(t, h, "POST", "/api/v1/databases/test/collections/products/indexes", `invalid json`)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestCreateIndexNoKey(t *testing.T) {
+	h, cleanup := setupTestHandler(t)
+	defer cleanup()
+
+	doReq(t, h, "POST", "/api/v1/databases/test/collections", `{"name":"products"}`)
+
+	// Name provided but no key
+	w := doReq(t, h, "POST", "/api/v1/databases/test/collections/products/indexes",
+		`{"name":"idx_name"}`)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestCreateUserInvalidJSON(t *testing.T) {
+	h, cleanup := setupTestHandler(t)
+	defer cleanup()
+
+	w := doReq(t, h, "POST", "/api/v1/users", `invalid json`)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestCreateUserNoUsername(t *testing.T) {
+	h, cleanup := setupTestHandler(t)
+	defer cleanup()
+
+	w := doReq(t, h, "POST", "/api/v1/users", `{"username":"","password":"secret"}`)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestCreateUserDefaultDB(t *testing.T) {
+	h, cleanup := setupTestHandler(t)
+	defer cleanup()
+
+	// Create user without specifying db - should default to "admin"
+	w := doReq(t, h, "POST", "/api/v1/users", `{"username":"defaultdbuser","password":"secret"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("create user = %d, want 200: %s", w.Code, w.Body.String())
+	}
+
+	// Verify user was created in admin db
+	w = doReq(t, h, "GET", "/api/v1/users?db=admin", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("list users = %d, want 200", w.Code)
+	}
+}
+
+func TestDeleteUserDefaultDB(t *testing.T) {
+	h, cleanup := setupTestHandler(t)
+	defer cleanup()
+
+	// Create user in admin db
+	doReq(t, h, "POST", "/api/v1/users", `{"username":"todelete","password":"pass"}`)
+
+	// Delete without specifying db - should default to "admin"
+	w := doReq(t, h, "DELETE", "/api/v1/users/todelete", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("delete user = %d, want 200: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestDeleteUserNotFound(t *testing.T) {
+	h, cleanup := setupTestHandler(t)
+	defer cleanup()
+
+	w := doReq(t, h, "DELETE", "/api/v1/users/nonexistent?db=admin", "")
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", w.Code)
+	}
+}
+
+func TestListDocumentsWithSkip(t *testing.T) {
+	h, cleanup := setupTestHandler(t)
+	defer cleanup()
+
+	doReq(t, h, "POST", "/api/v1/databases/test/collections", `{"name":"items"}`)
+
+	// Insert multiple documents
+	for i := 0; i < 5; i++ {
+		doReq(t, h, "POST", "/api/v1/databases/test/collections/items/documents",
+			`{"document":{"_id":"`+string(rune('a'+i))+`","value":`+string(rune('0'+i))+`}}`)
+	}
+
+	// List with skip
+	w := doReq(t, h, "GET", "/api/v1/databases/test/collections/items/documents?skip=2", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("list docs = %d, want 200: %s", w.Code, w.Body.String())
+	}
+
+	resp := decodeResp(t, w)
+	data := resp["data"].(map[string]any)
+	if data["skip"] != float64(2) {
+		t.Errorf("skip = %v, want 2", data["skip"])
+	}
+}
+
+func TestIntParam(t *testing.T) {
+	h, cleanup := setupTestHandler(t)
+	defer cleanup()
+
+	doReq(t, h, "POST", "/api/v1/databases/test/collections", `{"name":"items"}`)
+
+	// Test with valid int parameter
+	w := doReq(t, h, "GET", "/api/v1/databases/test/collections/items/documents?limit=5", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("list docs = %d, want 200: %s", w.Code, w.Body.String())
+	}
+
+	// Test with invalid int parameter (should use default)
+	w = doReq(t, h, "GET", "/api/v1/databases/test/collections/items/documents?limit=invalid", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("list docs = %d, want 200: %s", w.Code, w.Body.String())
+	}
+}

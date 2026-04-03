@@ -273,3 +273,24 @@ func TestMemtableSeqNumMonotonic(t *testing.T) {
 		t.Fatalf("expected seqNum 20, got %d", m.SeqNum())
 	}
 }
+
+// Test Memtable SkipList() getter
+func TestMemtable_SkipList(t *testing.T) {
+	m := NewMemtable(1 << 20)
+
+	// SkipList() should return the underlying skip list
+	sl := m.SkipList()
+	if sl == nil {
+		t.Fatal("SkipList() returned nil")
+	}
+
+	// We can use the skip list to add entries directly
+	// (though normally this is done through Memtable.Put)
+	sl.Put([]byte("test"), []byte("value"))
+
+	// Verify the data exists
+	val, ok := sl.Get([]byte("test"))
+	if !ok || !bytes.Equal(val, []byte("value")) {
+		t.Errorf("expected to find value in skip list")
+	}
+}

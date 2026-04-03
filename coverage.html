@@ -1,0 +1,1967 @@
+
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+		<title>bson: Go Coverage Report</title>
+		<style>
+			body {
+				background: black;
+				color: rgb(80, 80, 80);
+			}
+			body, pre, #legend span {
+				font-family: Menlo, monospace;
+				font-weight: bold;
+			}
+			#topbar {
+				background: black;
+				position: fixed;
+				top: 0; left: 0; right: 0;
+				height: 42px;
+				border-bottom: 1px solid rgb(80, 80, 80);
+			}
+			#content {
+				margin-top: 50px;
+			}
+			#nav, #legend {
+				float: left;
+				margin-left: 10px;
+			}
+			#legend {
+				margin-top: 12px;
+			}
+			#nav {
+				margin-top: 10px;
+			}
+			#legend span {
+				margin: 0 5px;
+			}
+			.cov0 { color: rgb(192, 0, 0) }
+.cov1 { color: rgb(128, 128, 128) }
+.cov2 { color: rgb(116, 140, 131) }
+.cov3 { color: rgb(104, 152, 134) }
+.cov4 { color: rgb(92, 164, 137) }
+.cov5 { color: rgb(80, 176, 140) }
+.cov6 { color: rgb(68, 188, 143) }
+.cov7 { color: rgb(56, 200, 146) }
+.cov8 { color: rgb(44, 212, 149) }
+.cov9 { color: rgb(32, 224, 152) }
+.cov10 { color: rgb(20, 236, 155) }
+
+		</style>
+	</head>
+	<body>
+		<div id="topbar">
+			<div id="nav">
+				<select id="files">
+				
+				<option value="file0">github.com/mammothengine/mammoth/pkg/bson/bson.go (75.8%)</option>
+				
+				<option value="file1">github.com/mammothengine/mammoth/pkg/bson/compare.go (39.0%)</option>
+				
+				<option value="file2">github.com/mammothengine/mammoth/pkg/bson/constructors.go (100.0%)</option>
+				
+				<option value="file3">github.com/mammothengine/mammoth/pkg/bson/decoder.go (69.2%)</option>
+				
+				<option value="file4">github.com/mammothengine/mammoth/pkg/bson/encoder.go (84.7%)</option>
+				
+				<option value="file5">github.com/mammothengine/mammoth/pkg/bson/marshal.go (87.6%)</option>
+				
+				<option value="file6">github.com/mammothengine/mammoth/pkg/bson/objectid.go (100.0%)</option>
+				
+				<option value="file7">github.com/mammothengine/mammoth/pkg/bson/raw.go (56.4%)</option>
+				
+				<option value="file8">github.com/mammothengine/mammoth/pkg/bson/unmarshal.go (57.4%)</option>
+				
+				</select>
+			</div>
+			<div id="legend">
+				<span>not tracked</span>
+			
+				<span class="cov0">not covered</span>
+				<span class="cov8">covered</span>
+			
+			</div>
+		</div>
+		<div id="content">
+		
+		<pre class="file" id="file0" style="display: none">package bson
+
+import "fmt"
+
+// Element represents a key-value pair in a BSON document.
+type Element struct {
+        Key   string
+        Value Value
+}
+
+// Document represents an ordered BSON document.
+type Document struct {
+        elements []Element
+        index    map[string]int
+}
+
+// NewDocument creates an empty BSON document.
+func NewDocument() *Document <span class="cov8" title="1">{
+        return &amp;Document{index: make(map[string]int)}
+}</span>
+
+// Set adds or updates a key-value pair.
+func (d *Document) Set(key string, value Value) <span class="cov8" title="1">{
+        if d.index != nil </span><span class="cov8" title="1">{
+                if i, ok := d.index[key]; ok </span><span class="cov8" title="1">{
+                        d.elements[i].Value = value
+                        return
+                }</span>
+        }
+        <span class="cov8" title="1">d.elements = append(d.elements, Element{Key: key, Value: value})
+        if d.index != nil </span><span class="cov8" title="1">{
+                d.index[key] = len(d.elements) - 1
+        }</span>
+}
+
+// Get returns the value for a key.
+func (d *Document) Get(key string) (Value, bool) <span class="cov8" title="1">{
+        if d.index != nil </span><span class="cov8" title="1">{
+                i, ok := d.index[key]
+                if !ok </span><span class="cov8" title="1">{
+                        return Value{}, false
+                }</span>
+                <span class="cov8" title="1">return d.elements[i].Value, true</span>
+        }
+        <span class="cov0" title="0">for _, e := range d.elements </span><span class="cov0" title="0">{
+                if e.Key == key </span><span class="cov0" title="0">{
+                        return e.Value, true
+                }</span>
+        }
+        <span class="cov0" title="0">return Value{}, false</span>
+}
+
+// Delete removes a key from the document.
+func (d *Document) Delete(key string) <span class="cov8" title="1">{
+        if d.index == nil </span><span class="cov0" title="0">{
+                for i := range d.elements </span><span class="cov0" title="0">{
+                        if d.elements[i].Key == key </span><span class="cov0" title="0">{
+                                d.elements = append(d.elements[:i], d.elements[i+1:]...)
+                                return
+                        }</span>
+                }
+                <span class="cov0" title="0">return</span>
+        }
+        <span class="cov8" title="1">i, ok := d.index[key]
+        if !ok </span><span class="cov0" title="0">{
+                return
+        }</span>
+        <span class="cov8" title="1">delete(d.index, key)
+        d.elements = append(d.elements[:i], d.elements[i+1:]...)
+        // Rebuild index for shifted elements
+        for j := i; j &lt; len(d.elements); j++ </span><span class="cov8" title="1">{
+                d.index[d.elements[j].Key] = j
+        }</span>
+}
+
+// Keys returns all keys in order.
+func (d *Document) Keys() []string <span class="cov8" title="1">{
+        keys := make([]string, len(d.elements))
+        for i, e := range d.elements </span><span class="cov8" title="1">{
+                keys[i] = e.Key
+        }</span>
+        <span class="cov8" title="1">return keys</span>
+}
+
+// Elements returns all elements.
+func (d *Document) Elements() []Element <span class="cov8" title="1">{
+        return d.elements
+}</span>
+
+// Len returns the number of elements.
+func (d *Document) Len() int <span class="cov8" title="1">{
+        return len(d.elements)
+}</span>
+
+// Has checks if a key exists.
+func (d *Document) Has(key string) bool <span class="cov8" title="1">{
+        if d.index != nil </span><span class="cov8" title="1">{
+                _, ok := d.index[key]
+                return ok
+        }</span>
+        <span class="cov0" title="0">for _, e := range d.elements </span><span class="cov0" title="0">{
+                if e.Key == key </span><span class="cov0" title="0">{
+                        return true
+                }</span>
+        }
+        <span class="cov0" title="0">return false</span>
+}
+
+// Value represents a BSON value with its type.
+type Value struct {
+        Type  BSONType
+        value interface{}
+}
+
+// Double returns the value as float64.
+func (v Value) Double() float64 <span class="cov8" title="1">{
+        if v.Type == TypeDouble </span><span class="cov8" title="1">{
+                return v.value.(float64)
+        }</span>
+        <span class="cov8" title="1">return 0</span>
+}
+
+// String returns the value as string.
+func (v Value) String() string <span class="cov8" title="1">{
+        if v.Type == TypeString </span><span class="cov8" title="1">{
+                return v.value.(string)
+        }</span>
+        <span class="cov0" title="0">return ""</span>
+}
+
+// Int32 returns the value as int32.
+func (v Value) Int32() int32 <span class="cov8" title="1">{
+        if v.Type == TypeInt32 </span><span class="cov8" title="1">{
+                return v.value.(int32)
+        }</span>
+        <span class="cov8" title="1">return 0</span>
+}
+
+// Int64 returns the value as int64.
+func (v Value) Int64() int64 <span class="cov8" title="1">{
+        if v.Type == TypeInt64 </span><span class="cov8" title="1">{
+                return v.value.(int64)
+        }</span>
+        <span class="cov8" title="1">return 0</span>
+}
+
+// Boolean returns the value as bool.
+func (v Value) Boolean() bool <span class="cov8" title="1">{
+        if v.Type == TypeBoolean </span><span class="cov8" title="1">{
+                return v.value.(bool)
+        }</span>
+        <span class="cov8" title="1">return false</span>
+}
+
+// DateTime returns the value as int64 (milliseconds since epoch).
+func (v Value) DateTime() int64 <span class="cov8" title="1">{
+        if v.Type == TypeDateTime </span><span class="cov8" title="1">{
+                return v.value.(int64)
+        }</span>
+        <span class="cov8" title="1">return 0</span>
+}
+
+// Timestamp returns the value as uint64.
+func (v Value) Timestamp() uint64 <span class="cov8" title="1">{
+        if v.Type == TypeTimestamp </span><span class="cov8" title="1">{
+                return v.value.(uint64)
+        }</span>
+        <span class="cov0" title="0">return 0</span>
+}
+
+// ObjectID returns the value as ObjectID.
+func (v Value) ObjectID() ObjectID <span class="cov8" title="1">{
+        if v.Type == TypeObjectID </span><span class="cov8" title="1">{
+                return v.value.(ObjectID)
+        }</span>
+        <span class="cov8" title="1">return ObjectID{}</span>
+}
+
+// Binary returns the value as Binary.
+func (v Value) Binary() Binary <span class="cov8" title="1">{
+        if v.Type == TypeBinary </span><span class="cov8" title="1">{
+                return v.value.(Binary)
+        }</span>
+        <span class="cov8" title="1">return Binary{}</span>
+}
+
+// DocumentValue returns the value as *Document.
+func (v Value) DocumentValue() *Document <span class="cov8" title="1">{
+        if v.Type == TypeDocument </span><span class="cov8" title="1">{
+                return v.value.(*Document)
+        }</span>
+        <span class="cov8" title="1">return nil</span>
+}
+
+// ArrayValue returns the value as Array.
+func (v Value) ArrayValue() Array <span class="cov8" title="1">{
+        if v.Type == TypeArray </span><span class="cov8" title="1">{
+                return v.value.(Array)
+        }</span>
+        <span class="cov8" title="1">return nil</span>
+}
+
+// Regex returns the value as Regex.
+func (v Value) Regex() Regex <span class="cov8" title="1">{
+        if v.Type == TypeRegex </span><span class="cov8" title="1">{
+                return v.value.(Regex)
+        }</span>
+        <span class="cov8" title="1">return Regex{}</span>
+}
+
+// JavaScriptCode returns the value as string.
+func (v Value) JavaScriptCode() string <span class="cov8" title="1">{
+        if v.Type == TypeJavaScript </span><span class="cov8" title="1">{
+                return v.value.(string)
+        }</span>
+        <span class="cov0" title="0">return ""</span>
+}
+
+// CodeScope returns the value as CodeWithScope.
+func (v Value) CodeScope() CodeWithScope <span class="cov0" title="0">{
+        if v.Type == TypeCodeScope </span><span class="cov0" title="0">{
+                return v.value.(CodeWithScope)
+        }</span>
+        <span class="cov0" title="0">return CodeWithScope{}</span>
+}
+
+// Symbol returns the value as string.
+func (v Value) Symbol() string <span class="cov8" title="1">{
+        if v.Type == TypeSymbol </span><span class="cov8" title="1">{
+                return v.value.(string)
+        }</span>
+        <span class="cov0" title="0">return ""</span>
+}
+
+// Interface returns the raw interface{} value.
+func (v Value) Interface() interface{} <span class="cov8" title="1">{
+        return v.value
+}</span>
+
+// IsNull returns true if the value is null.
+func (v Value) IsNull() bool <span class="cov8" title="1">{
+        return v.Type == TypeNull
+}</span>
+
+// Binary holds BSON Binary data.
+type Binary struct {
+        Subtype BinarySubtype
+        Data    []byte
+}
+
+// Regex holds a BSON Regex value.
+type Regex struct {
+        Pattern string
+        Options string
+}
+
+// CodeWithScope holds a BSON JavaScript with scope value.
+type CodeWithScope struct {
+        Code  string
+        Scope *Document
+}
+
+// DBPointer holds a BSON DBPointer value.
+type DBPointer struct {
+        Namespace string
+        ID        ObjectID
+}
+
+// Array is a slice of Values.
+type Array []Value
+
+// String returns a human-readable representation.
+func (d *Document) String() string <span class="cov0" title="0">{
+        return fmt.Sprintf("%v", d.elements)
+}</span>
+</pre>
+		
+		<pre class="file" id="file1" style="display: none">package bson
+
+// Compare type ordering follows MongoDB's BSON comparison order:
+// MinKey &lt; Null &lt; Numbers &lt; String &lt; Object &lt; Array &lt; BinData &lt; ObjectId &lt; Boolean &lt; Date &lt; Timestamp &lt; RegExp &lt; DBRef &lt; CodeScope &lt; Code &lt; Symbol &lt; Int32 &lt; Int64 &lt; Decimal128 &lt; MaxKey
+
+// typeOrder returns the sort priority of a BSON type.
+func typeOrder(t BSONType) int <span class="cov8" title="1">{
+        switch t </span>{
+        case TypeMinKey:<span class="cov8" title="1">
+                return -1</span>
+        case TypeNull:<span class="cov8" title="1">
+                return 0</span>
+        case TypeInt32, TypeInt64, TypeDouble:<span class="cov8" title="1">
+                return 1</span>
+        case TypeString:<span class="cov8" title="1">
+                return 2</span>
+        case TypeDocument:<span class="cov0" title="0">
+                return 3</span>
+        case TypeArray:<span class="cov8" title="1">
+                return 4</span>
+        case TypeBinary:<span class="cov0" title="0">
+                return 5</span>
+        case TypeObjectID:<span class="cov0" title="0">
+                return 6</span>
+        case TypeBoolean:<span class="cov8" title="1">
+                return 7</span>
+        case TypeDateTime:<span class="cov8" title="1">
+                return 8</span>
+        case TypeTimestamp:<span class="cov0" title="0">
+                return 9</span>
+        case TypeRegex:<span class="cov8" title="1">
+                return 10</span>
+        case TypeDBPointer:<span class="cov0" title="0">
+                return 11</span>
+        case TypeCodeScope:<span class="cov0" title="0">
+                return 12</span>
+        case TypeJavaScript:<span class="cov0" title="0">
+                return 13</span>
+        case TypeSymbol:<span class="cov0" title="0">
+                return 14</span>
+        case TypeDecimal128:<span class="cov0" title="0">
+                return 15</span>
+        case TypeMaxKey:<span class="cov8" title="1">
+                return 16</span>
+        default:<span class="cov0" title="0">
+                return 100</span>
+        }
+}
+
+// CompareValues compares two BSON Values. Returns -1, 0, or 1.
+func CompareValues(a, b Value) int <span class="cov8" title="1">{
+        oa, ob := typeOrder(a.Type), typeOrder(b.Type)
+
+        // Normalize numeric types to the same order group
+        if oa == 1 &amp;&amp; ob == 1 </span><span class="cov8" title="1">{
+                return compareNumbers(a, b)
+        }</span>
+
+        <span class="cov8" title="1">if oa &lt; ob </span><span class="cov8" title="1">{
+                return -1
+        }</span>
+        <span class="cov8" title="1">if oa &gt; ob </span><span class="cov8" title="1">{
+                return 1
+        }</span>
+
+        // Same type order
+        <span class="cov8" title="1">switch a.Type </span>{
+        case TypeNull:<span class="cov8" title="1">
+                return 0</span>
+        case TypeBoolean:<span class="cov8" title="1">
+                ab, bb := a.Boolean(), b.Boolean()
+                if ab == bb </span><span class="cov0" title="0">{
+                        return 0
+                }</span>
+                <span class="cov8" title="1">if !ab </span><span class="cov8" title="1">{
+                        return -1
+                }</span>
+                <span class="cov8" title="1">return 1</span>
+        case TypeInt32:<span class="cov0" title="0">
+                av, bv := a.Int32(), b.Int32()
+                if av &lt; bv </span><span class="cov0" title="0">{
+                        return -1
+                }</span>
+                <span class="cov0" title="0">if av &gt; bv </span><span class="cov0" title="0">{
+                        return 1
+                }</span>
+                <span class="cov0" title="0">return 0</span>
+        case TypeInt64:<span class="cov0" title="0">
+                av, bv := a.Int64(), b.Int64()
+                if av &lt; bv </span><span class="cov0" title="0">{
+                        return -1
+                }</span>
+                <span class="cov0" title="0">if av &gt; bv </span><span class="cov0" title="0">{
+                        return 1
+                }</span>
+                <span class="cov0" title="0">return 0</span>
+        case TypeDouble:<span class="cov0" title="0">
+                av, bv := a.Double(), b.Double()
+                if av &lt; bv </span><span class="cov0" title="0">{
+                        return -1
+                }</span>
+                <span class="cov0" title="0">if av &gt; bv </span><span class="cov0" title="0">{
+                        return 1
+                }</span>
+                <span class="cov0" title="0">return 0</span>
+        case TypeString, TypeSymbol:<span class="cov8" title="1">
+                av, bv := a.String(), b.String()
+                if av &lt; bv </span><span class="cov8" title="1">{
+                        return -1
+                }</span>
+                <span class="cov8" title="1">if av &gt; bv </span><span class="cov8" title="1">{
+                        return 1
+                }</span>
+                <span class="cov8" title="1">return 0</span>
+        case TypeObjectID:<span class="cov0" title="0">
+                aa, bb := a.ObjectID(), b.ObjectID()
+                return compareBytes(aa[:], bb[:])</span>
+        case TypeDateTime:<span class="cov0" title="0">
+                av, bv := a.DateTime(), b.DateTime()
+                if av &lt; bv </span><span class="cov0" title="0">{
+                        return -1
+                }</span>
+                <span class="cov0" title="0">if av &gt; bv </span><span class="cov0" title="0">{
+                        return 1
+                }</span>
+                <span class="cov0" title="0">return 0</span>
+        case TypeTimestamp:<span class="cov0" title="0">
+                av, bv := a.Timestamp(), b.Timestamp()
+                if av &lt; bv </span><span class="cov0" title="0">{
+                        return -1
+                }</span>
+                <span class="cov0" title="0">if av &gt; bv </span><span class="cov0" title="0">{
+                        return 1
+                }</span>
+                <span class="cov0" title="0">return 0</span>
+        case TypeBinary:<span class="cov0" title="0">
+                ab, bb := a.Binary(), b.Binary()
+                if ab.Subtype &lt; bb.Subtype </span><span class="cov0" title="0">{
+                        return -1
+                }</span>
+                <span class="cov0" title="0">if ab.Subtype &gt; bb.Subtype </span><span class="cov0" title="0">{
+                        return 1
+                }</span>
+                <span class="cov0" title="0">return compareBytes(ab.Data, bb.Data)</span>
+        case TypeDocument:<span class="cov0" title="0">
+                return CompareDocuments(a.DocumentValue(), b.DocumentValue())</span>
+        case TypeArray:<span class="cov8" title="1">
+                return compareArrays(a.ArrayValue(), b.ArrayValue())</span>
+        case TypeRegex:<span class="cov0" title="0">
+                ar, br := a.Regex(), b.Regex()
+                c := compareStrings(ar.Pattern, br.Pattern)
+                if c != 0 </span><span class="cov0" title="0">{
+                        return c
+                }</span>
+                <span class="cov0" title="0">return compareStrings(ar.Options, br.Options)</span>
+        }
+
+        <span class="cov0" title="0">return 0</span>
+}
+
+func compareNumbers(a, b Value) int <span class="cov8" title="1">{
+        af := toFloat64(a)
+        bf := toFloat64(b)
+        if af &lt; bf </span><span class="cov8" title="1">{
+                return -1
+        }</span>
+        <span class="cov8" title="1">if af &gt; bf </span><span class="cov8" title="1">{
+                return 1
+        }</span>
+        <span class="cov8" title="1">return 0</span>
+}
+
+func toFloat64(v Value) float64 <span class="cov8" title="1">{
+        switch v.Type </span>{
+        case TypeDouble:<span class="cov8" title="1">
+                return v.Double()</span>
+        case TypeInt32:<span class="cov8" title="1">
+                return float64(v.Int32())</span>
+        case TypeInt64:<span class="cov8" title="1">
+                return float64(v.Int64())</span>
+        }
+        <span class="cov0" title="0">return 0</span>
+}
+
+// CompareDocuments compares two documents field by field.
+func CompareDocuments(a, b *Document) int <span class="cov8" title="1">{
+        ae, be := a.Elements(), b.Elements()
+        minLen := len(ae)
+        if len(be) &lt; minLen </span><span class="cov0" title="0">{
+                minLen = len(be)
+        }</span>
+        <span class="cov8" title="1">for i := 0; i &lt; minLen; i++ </span><span class="cov8" title="1">{
+                if ae[i].Key &lt; be[i].Key </span><span class="cov0" title="0">{
+                        return -1
+                }</span>
+                <span class="cov8" title="1">if ae[i].Key &gt; be[i].Key </span><span class="cov0" title="0">{
+                        return 1
+                }</span>
+                <span class="cov8" title="1">c := CompareValues(ae[i].Value, be[i].Value)
+                if c != 0 </span><span class="cov8" title="1">{
+                        return c
+                }</span>
+        }
+        <span class="cov0" title="0">if len(ae) &lt; len(be) </span><span class="cov0" title="0">{
+                return -1
+        }</span>
+        <span class="cov0" title="0">if len(ae) &gt; len(be) </span><span class="cov0" title="0">{
+                return 1
+        }</span>
+        <span class="cov0" title="0">return 0</span>
+}
+
+func compareArrays(a, b Array) int <span class="cov8" title="1">{
+        minLen := len(a)
+        if len(b) &lt; minLen </span><span class="cov0" title="0">{
+                minLen = len(b)
+        }</span>
+        <span class="cov8" title="1">for i := 0; i &lt; minLen; i++ </span><span class="cov8" title="1">{
+                c := CompareValues(a[i], b[i])
+                if c != 0 </span><span class="cov8" title="1">{
+                        return c
+                }</span>
+        }
+        <span class="cov0" title="0">if len(a) &lt; len(b) </span><span class="cov0" title="0">{
+                return -1
+        }</span>
+        <span class="cov0" title="0">if len(a) &gt; len(b) </span><span class="cov0" title="0">{
+                return 1
+        }</span>
+        <span class="cov0" title="0">return 0</span>
+}
+
+func compareBytes(a, b []byte) int <span class="cov0" title="0">{
+        minLen := len(a)
+        if len(b) &lt; minLen </span><span class="cov0" title="0">{
+                minLen = len(b)
+        }</span>
+        <span class="cov0" title="0">for i := 0; i &lt; minLen; i++ </span><span class="cov0" title="0">{
+                if a[i] &lt; b[i] </span><span class="cov0" title="0">{
+                        return -1
+                }</span>
+                <span class="cov0" title="0">if a[i] &gt; b[i] </span><span class="cov0" title="0">{
+                        return 1
+                }</span>
+        }
+        <span class="cov0" title="0">if len(a) &lt; len(b) </span><span class="cov0" title="0">{
+                return -1
+        }</span>
+        <span class="cov0" title="0">if len(a) &gt; len(b) </span><span class="cov0" title="0">{
+                return 1
+        }</span>
+        <span class="cov0" title="0">return 0</span>
+}
+
+func compareStrings(a, b string) int <span class="cov0" title="0">{
+        if a &lt; b </span><span class="cov0" title="0">{
+                return -1
+        }</span>
+        <span class="cov0" title="0">if a &gt; b </span><span class="cov0" title="0">{
+                return 1
+        }</span>
+        <span class="cov0" title="0">return 0</span>
+}
+</pre>
+		
+		<pre class="file" id="file2" style="display: none">package bson
+
+// D creates a Document from alternating key-value pairs.
+func D(pairs ...interface{}) *Document <span class="cov8" title="1">{
+        doc := NewDocument()
+        for i := 0; i+1 &lt; len(pairs); i += 2 </span><span class="cov8" title="1">{
+                key := pairs[i].(string)
+                val := pairs[i+1].(Value)
+                doc.Set(key, val)
+        }</span>
+        <span class="cov8" title="1">return doc</span>
+}
+
+// M creates a Document from a map[string]Value.
+func M(m map[string]Value) *Document <span class="cov8" title="1">{
+        doc := NewDocument()
+        for k, v := range m </span><span class="cov8" title="1">{
+                doc.Set(k, v)
+        }</span>
+        <span class="cov8" title="1">return doc</span>
+}
+
+// A creates an Array from Values.
+func A(vals ...Value) Array <span class="cov8" title="1">{
+        return Array(vals)
+}</span>
+
+// Value constructors
+
+// VDouble creates a Double value.
+func VDouble(v float64) Value <span class="cov8" title="1">{
+        return Value{Type: TypeDouble, value: v}
+}</span>
+
+// VString creates a String value.
+func VString(v string) Value <span class="cov8" title="1">{
+        return Value{Type: TypeString, value: v}
+}</span>
+
+// VDoc creates a Document value.
+func VDoc(d *Document) Value <span class="cov8" title="1">{
+        return Value{Type: TypeDocument, value: d}
+}</span>
+
+// VArray creates an Array value.
+func VArray(a Array) Value <span class="cov8" title="1">{
+        return Value{Type: TypeArray, value: a}
+}</span>
+
+// VBinary creates a Binary value.
+func VBinary(subtype BinarySubtype, data []byte) Value <span class="cov8" title="1">{
+        return Value{Type: TypeBinary, value: Binary{Subtype: subtype, Data: data}}
+}</span>
+
+// VBool creates a Boolean value.
+func VBool(v bool) Value <span class="cov8" title="1">{
+        return Value{Type: TypeBoolean, value: v}
+}</span>
+
+// VDateTime creates a DateTime value.
+func VDateTime(ms int64) Value <span class="cov8" title="1">{
+        return Value{Type: TypeDateTime, value: ms}
+}</span>
+
+// VInt32 creates an Int32 value.
+func VInt32(v int32) Value <span class="cov8" title="1">{
+        return Value{Type: TypeInt32, value: v}
+}</span>
+
+// VInt64 creates an Int64 value.
+func VInt64(v int64) Value <span class="cov8" title="1">{
+        return Value{Type: TypeInt64, value: v}
+}</span>
+
+// VNull creates a Null value.
+func VNull() Value <span class="cov8" title="1">{
+        return Value{Type: TypeNull, value: nil}
+}</span>
+
+// VObjectID creates an ObjectID value.
+func VObjectID(id ObjectID) Value <span class="cov8" title="1">{
+        return Value{Type: TypeObjectID, value: id}
+}</span>
+
+// VRegex creates a Regex value.
+func VRegex(pattern, options string) Value <span class="cov8" title="1">{
+        return Value{Type: TypeRegex, value: Regex{Pattern: pattern, Options: options}}
+}</span>
+
+// VTimestamp creates a Timestamp value.
+func VTimestamp(v uint64) Value <span class="cov8" title="1">{
+        return Value{Type: TypeTimestamp, value: v}
+}</span>
+
+// VSymbol creates a Symbol value.
+func VSymbol(v string) Value <span class="cov8" title="1">{
+        return Value{Type: TypeSymbol, value: v}
+}</span>
+
+// VJavaScript creates a JavaScript value.
+func VJavaScript(code string) Value <span class="cov8" title="1">{
+        return Value{Type: TypeJavaScript, value: code}
+}</span>
+
+// VMinKey creates a MinKey value.
+func VMinKey() Value <span class="cov8" title="1">{
+        return Value{Type: TypeMinKey, value: nil}
+}</span>
+
+// VMaxKey creates a MaxKey value.
+func VMaxKey() Value <span class="cov8" title="1">{
+        return Value{Type: TypeMaxKey, value: nil}
+}</span>
+</pre>
+		
+		<pre class="file" id="file3" style="display: none">package bson
+
+import (
+        "encoding/binary"
+        "errors"
+        "fmt"
+        "math"
+)
+
+var (
+        errInvalidDocument = errors.New("invalid BSON document")
+        errBufferTooShort  = errors.New("buffer too short")
+)
+
+// Decode parses BSON bytes into a Document.
+func Decode(data []byte) (*Document, error) <span class="cov8" title="1">{
+        if len(data) &lt; 5 </span><span class="cov8" title="1">{
+                return nil, errBufferTooShort
+        }</span>
+
+        <span class="cov8" title="1">size := int(binary.LittleEndian.Uint32(data))
+        if len(data) &lt; size </span><span class="cov8" title="1">{
+                return nil, fmt.Errorf("document size %d exceeds buffer %d: %w", size, len(data), errBufferTooShort)
+        }</span>
+        <span class="cov8" title="1">if data[size-1] != 0x00 </span><span class="cov0" title="0">{
+                return nil, errors.New("document not null-terminated")
+        }</span>
+
+        <span class="cov8" title="1">doc := NewDocument()
+        pos := 4
+
+        for pos &lt; size-1 </span><span class="cov8" title="1">{
+                if pos &gt;= len(data) </span><span class="cov0" title="0">{
+                        return nil, errInvalidDocument
+                }</span>
+
+                <span class="cov8" title="1">typ := BSONType(data[pos])
+                pos++
+
+                key, err := readCString(data, &amp;pos)
+                if err != nil </span><span class="cov0" title="0">{
+                        return nil, err
+                }</span>
+
+                <span class="cov8" title="1">val, err := decodeValue(data, &amp;pos, typ)
+                if err != nil </span><span class="cov0" title="0">{
+                        return nil, fmt.Errorf("field %q: %w", key, err)
+                }</span>
+
+                <span class="cov8" title="1">doc.Set(key, val)</span>
+        }
+
+        <span class="cov8" title="1">return doc, nil</span>
+}
+
+func decodeValue(data []byte, pos *int, typ BSONType) (Value, error) <span class="cov8" title="1">{
+        switch typ </span>{
+        case TypeDouble:<span class="cov8" title="1">
+                if *pos+8 &gt; len(data) </span><span class="cov0" title="0">{
+                        return Value{}, errBufferTooShort
+                }</span>
+                <span class="cov8" title="1">bits := binary.LittleEndian.Uint64(data[*pos:])
+                *pos += 8
+                return VDouble(float64fromBits(bits)), nil</span>
+
+        case TypeString:<span class="cov8" title="1">
+                s, err := readString(data, pos)
+                if err != nil </span><span class="cov0" title="0">{
+                        return Value{}, err
+                }</span>
+                <span class="cov8" title="1">return VString(s), nil</span>
+
+        case TypeDocument:<span class="cov8" title="1">
+                inner, err := decodeInlineDocument(data, pos)
+                if err != nil </span><span class="cov0" title="0">{
+                        return Value{}, err
+                }</span>
+                <span class="cov8" title="1">return Value{Type: TypeDocument, value: inner}, nil</span>
+
+        case TypeArray:<span class="cov8" title="1">
+                arr, err := decodeArray(data, pos)
+                if err != nil </span><span class="cov0" title="0">{
+                        return Value{}, err
+                }</span>
+                <span class="cov8" title="1">return Value{Type: TypeArray, value: arr}, nil</span>
+
+        case TypeBinary:<span class="cov8" title="1">
+                b, err := decodeBinary(data, pos)
+                if err != nil </span><span class="cov0" title="0">{
+                        return Value{}, err
+                }</span>
+                <span class="cov8" title="1">return Value{Type: TypeBinary, value: b}, nil</span>
+
+        case TypeUndefined:<span class="cov0" title="0">
+                return Value{Type: TypeUndefined, value: nil}, nil</span>
+
+        case TypeObjectID:<span class="cov8" title="1">
+                if *pos+12 &gt; len(data) </span><span class="cov0" title="0">{
+                        return Value{}, errBufferTooShort
+                }</span>
+                <span class="cov8" title="1">var id ObjectID
+                copy(id[:], data[*pos:*pos+12])
+                *pos += 12
+                return Value{Type: TypeObjectID, value: id}, nil</span>
+
+        case TypeBoolean:<span class="cov8" title="1">
+                if *pos+1 &gt; len(data) </span><span class="cov0" title="0">{
+                        return Value{}, errBufferTooShort
+                }</span>
+                <span class="cov8" title="1">v := data[*pos] != 0
+                *pos++
+                return VBool(v), nil</span>
+
+        case TypeDateTime:<span class="cov8" title="1">
+                if *pos+8 &gt; len(data) </span><span class="cov0" title="0">{
+                        return Value{}, errBufferTooShort
+                }</span>
+                <span class="cov8" title="1">ms := int64(binary.LittleEndian.Uint64(data[*pos:]))
+                *pos += 8
+                return VDateTime(ms), nil</span>
+
+        case TypeNull:<span class="cov8" title="1">
+                return VNull(), nil</span>
+
+        case TypeRegex:<span class="cov8" title="1">
+                pattern, err := readCString(data, pos)
+                if err != nil </span><span class="cov0" title="0">{
+                        return Value{}, err
+                }</span>
+                <span class="cov8" title="1">options, err := readCString(data, pos)
+                if err != nil </span><span class="cov0" title="0">{
+                        return Value{}, err
+                }</span>
+                <span class="cov8" title="1">return Value{Type: TypeRegex, value: Regex{Pattern: pattern, Options: options}}, nil</span>
+
+        case TypeDBPointer:<span class="cov0" title="0">
+                ns, err := readString(data, pos)
+                if err != nil </span><span class="cov0" title="0">{
+                        return Value{}, err
+                }</span>
+                <span class="cov0" title="0">if *pos+12 &gt; len(data) </span><span class="cov0" title="0">{
+                        return Value{}, errBufferTooShort
+                }</span>
+                <span class="cov0" title="0">var id ObjectID
+                copy(id[:], data[*pos:*pos+12])
+                *pos += 12
+                return Value{Type: TypeDBPointer, value: DBPointer{Namespace: ns, ID: id}}, nil</span>
+
+        case TypeJavaScript:<span class="cov8" title="1">
+                s, err := readString(data, pos)
+                if err != nil </span><span class="cov0" title="0">{
+                        return Value{}, err
+                }</span>
+                <span class="cov8" title="1">return Value{Type: TypeJavaScript, value: s}, nil</span>
+
+        case TypeSymbol:<span class="cov8" title="1">
+                s, err := readString(data, pos)
+                if err != nil </span><span class="cov0" title="0">{
+                        return Value{}, err
+                }</span>
+                <span class="cov8" title="1">return Value{Type: TypeSymbol, value: s}, nil</span>
+
+        case TypeCodeScope:<span class="cov0" title="0">
+                if *pos+4 &gt; len(data) </span><span class="cov0" title="0">{
+                        return Value{}, errBufferTooShort
+                }</span>
+                <span class="cov0" title="0">totalLen := int(binary.LittleEndian.Uint32(data[*pos:]))
+                *pos += 4
+                endPos := *pos - 4 + totalLen
+
+                code, err := readString(data, pos)
+                if err != nil </span><span class="cov0" title="0">{
+                        return Value{}, err
+                }</span>
+                <span class="cov0" title="0">scope, err := decodeInlineDocument(data, pos)
+                if err != nil </span><span class="cov0" title="0">{
+                        return Value{}, err
+                }</span>
+                <span class="cov0" title="0">*pos = endPos
+                return Value{Type: TypeCodeScope, value: CodeWithScope{Code: code, Scope: scope}}, nil</span>
+
+        case TypeInt32:<span class="cov8" title="1">
+                if *pos+4 &gt; len(data) </span><span class="cov0" title="0">{
+                        return Value{}, errBufferTooShort
+                }</span>
+                <span class="cov8" title="1">v := int32(binary.LittleEndian.Uint32(data[*pos:]))
+                *pos += 4
+                return VInt32(v), nil</span>
+
+        case TypeTimestamp:<span class="cov8" title="1">
+                if *pos+8 &gt; len(data) </span><span class="cov0" title="0">{
+                        return Value{}, errBufferTooShort
+                }</span>
+                <span class="cov8" title="1">v := binary.LittleEndian.Uint64(data[*pos:])
+                *pos += 8
+                return Value{Type: TypeTimestamp, value: v}, nil</span>
+
+        case TypeInt64:<span class="cov8" title="1">
+                if *pos+8 &gt; len(data) </span><span class="cov0" title="0">{
+                        return Value{}, errBufferTooShort
+                }</span>
+                <span class="cov8" title="1">v := int64(binary.LittleEndian.Uint64(data[*pos:]))
+                *pos += 8
+                return VInt64(v), nil</span>
+
+        case TypeDecimal128:<span class="cov8" title="1">
+                if *pos+16 &gt; len(data) </span><span class="cov0" title="0">{
+                        return Value{}, errBufferTooShort
+                }</span>
+                <span class="cov8" title="1">var d [16]byte
+                copy(d[:], data[*pos:*pos+16])
+                *pos += 16
+                return Value{Type: TypeDecimal128, value: d}, nil</span>
+
+        case TypeMinKey:<span class="cov8" title="1">
+                return Value{Type: TypeMinKey, value: nil}, nil</span>
+
+        case TypeMaxKey:<span class="cov8" title="1">
+                return Value{Type: TypeMaxKey, value: nil}, nil</span>
+
+        default:<span class="cov0" title="0">
+                return Value{}, fmt.Errorf("unknown BSON type: 0x%02x", typ)</span>
+        }
+}
+
+func decodeInlineDocument(data []byte, pos *int) (*Document, error) <span class="cov8" title="1">{
+        if *pos+4 &gt; len(data) </span><span class="cov0" title="0">{
+                return nil, errBufferTooShort
+        }</span>
+        <span class="cov8" title="1">size := int(binary.LittleEndian.Uint32(data[*pos:]))
+        if *pos+size &gt; len(data) </span><span class="cov0" title="0">{
+                return nil, errBufferTooShort
+        }</span>
+        <span class="cov8" title="1">doc, err := Decode(data[*pos : *pos+size])
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, err
+        }</span>
+        <span class="cov8" title="1">*pos += size
+        return doc, nil</span>
+}
+
+func decodeArray(data []byte, pos *int) (Array, error) <span class="cov8" title="1">{
+        if *pos+4 &gt; len(data) </span><span class="cov0" title="0">{
+                return nil, errBufferTooShort
+        }</span>
+        <span class="cov8" title="1">size := int(binary.LittleEndian.Uint32(data[*pos:]))
+        endPos := *pos + size
+        if endPos &gt; len(data) </span><span class="cov0" title="0">{
+                return nil, errBufferTooShort
+        }</span>
+
+        <span class="cov8" title="1">var arr Array
+        p := *pos + 4
+
+        for p &lt; endPos-1 </span><span class="cov8" title="1">{
+                typ := BSONType(data[p])
+                p++
+
+                // Read key (numeric string index)
+                _, err := readCString(data, &amp;p)
+                if err != nil </span><span class="cov0" title="0">{
+                        return nil, err
+                }</span>
+
+                <span class="cov8" title="1">val, err := decodeValue(data, &amp;p, typ)
+                if err != nil </span><span class="cov0" title="0">{
+                        return nil, err
+                }</span>
+                <span class="cov8" title="1">arr = append(arr, val)</span>
+        }
+
+        <span class="cov8" title="1">*pos = endPos
+        return arr, nil</span>
+}
+
+func decodeBinary(data []byte, pos *int) (Binary, error) <span class="cov8" title="1">{
+        if *pos+4 &gt; len(data) </span><span class="cov0" title="0">{
+                return Binary{}, errBufferTooShort
+        }</span>
+        <span class="cov8" title="1">length := int(binary.LittleEndian.Uint32(data[*pos:]))
+        *pos += 4
+        if *pos+1 &gt; len(data) </span><span class="cov0" title="0">{
+                return Binary{}, errBufferTooShort
+        }</span>
+        <span class="cov8" title="1">subtype := BinarySubtype(data[*pos])
+        *pos++
+        if *pos+length &gt; len(data) </span><span class="cov0" title="0">{
+                return Binary{}, errBufferTooShort
+        }</span>
+        <span class="cov8" title="1">b := Binary{Subtype: subtype, Data: make([]byte, length)}
+        copy(b.Data, data[*pos:*pos+length])
+        *pos += length
+        return b, nil</span>
+}
+
+func readCString(data []byte, pos *int) (string, error) <span class="cov8" title="1">{
+        end := *pos
+        for end &lt; len(data) &amp;&amp; data[end] != 0x00 </span><span class="cov8" title="1">{
+                end++
+        }</span>
+        <span class="cov8" title="1">if end &gt;= len(data) </span><span class="cov0" title="0">{
+                return "", errInvalidDocument
+        }</span>
+        <span class="cov8" title="1">s := string(data[*pos:end])
+        *pos = end + 1
+        return s, nil</span>
+}
+
+func readString(data []byte, pos *int) (string, error) <span class="cov8" title="1">{
+        if *pos+4 &gt; len(data) </span><span class="cov0" title="0">{
+                return "", errBufferTooShort
+        }</span>
+        <span class="cov8" title="1">length := int(binary.LittleEndian.Uint32(data[*pos:]))
+        *pos += 4
+        if *pos+length &gt; len(data) </span><span class="cov0" title="0">{
+                return "", errBufferTooShort
+        }</span>
+        // length includes null terminator
+        <span class="cov8" title="1">s := string(data[*pos : *pos+length-1])
+        *pos += length
+        return s, nil</span>
+}
+
+func float64fromBits(b uint64) float64 <span class="cov8" title="1">{
+        return math.Float64frombits(b)
+}</span>
+</pre>
+		
+		<pre class="file" id="file4" style="display: none">package bson
+
+import (
+        "encoding/binary"
+        "math"
+)
+
+// Encode serializes a Document to BSON bytes.
+func Encode(doc *Document) []byte <span class="cov8" title="1">{
+        // Pre-calculate size
+        size := 4 // int32 size
+        for _, e := range doc.elements </span><span class="cov8" title="1">{
+                size += elementSize(e)
+        }</span>
+        <span class="cov8" title="1">size++ // null terminator
+
+        buf := make([]byte, 0, size)
+        buf = binary.LittleEndian.AppendUint32(buf, uint32(size))
+
+        for _, e := range doc.elements </span><span class="cov8" title="1">{
+                buf = appendElement(buf, e)
+        }</span>
+        <span class="cov8" title="1">buf = append(buf, 0x00)
+
+        // Fix size
+        binary.LittleEndian.PutUint32(buf, uint32(len(buf)))
+        return buf</span>
+}
+
+func elementSize(e Element) int <span class="cov8" title="1">{
+        size := 1 + len(e.Key) + 1 // type + key + null
+        size += valueSize(e.Value)
+        return size
+}</span>
+
+func valueSize(v Value) int <span class="cov8" title="1">{
+        switch v.Type </span>{
+        case TypeDouble:<span class="cov8" title="1">
+                return 8</span>
+        case TypeString:<span class="cov8" title="1">
+                return 4 + len(v.value.(string)) + 1</span>
+        case TypeDocument:<span class="cov8" title="1">
+                return len(Encode(v.value.(*Document)))</span>
+        case TypeArray:<span class="cov8" title="1">
+                arr := v.value.(Array)
+                return arraySize(arr)</span>
+        case TypeBinary:<span class="cov8" title="1">
+                b := v.value.(Binary)
+                return 4 + 1 + len(b.Data)</span>
+        case TypeUndefined:<span class="cov0" title="0">
+                return 0</span>
+        case TypeObjectID:<span class="cov8" title="1">
+                return 12</span>
+        case TypeBoolean:<span class="cov8" title="1">
+                return 1</span>
+        case TypeDateTime:<span class="cov8" title="1">
+                return 8</span>
+        case TypeNull:<span class="cov8" title="1">
+                return 0</span>
+        case TypeRegex:<span class="cov8" title="1">
+                r := v.value.(Regex)
+                return len(r.Pattern) + 1 + len(r.Options) + 1</span>
+        case TypeDBPointer:<span class="cov0" title="0">
+                dp := v.value.(DBPointer)
+                return 4 + len(dp.Namespace) + 1 + 12</span>
+        case TypeJavaScript:<span class="cov8" title="1">
+                return 4 + len(v.value.(string)) + 1</span>
+        case TypeSymbol:<span class="cov8" title="1">
+                return 4 + len(v.value.(string)) + 1</span>
+        case TypeCodeScope:<span class="cov0" title="0">
+                cs := v.value.(CodeWithScope)
+                scope := Encode(cs.Scope)
+                return 4 + 4 + len(cs.Code) + 1 + len(scope)</span>
+        case TypeInt32:<span class="cov8" title="1">
+                return 4</span>
+        case TypeTimestamp:<span class="cov8" title="1">
+                return 8</span>
+        case TypeInt64:<span class="cov8" title="1">
+                return 8</span>
+        case TypeDecimal128:<span class="cov8" title="1">
+                return 16</span>
+        case TypeMinKey, TypeMaxKey:<span class="cov8" title="1">
+                return 0</span>
+        }
+        <span class="cov0" title="0">return 0</span>
+}
+
+func arraySize(arr Array) int <span class="cov8" title="1">{
+        size := 4 // int32 size
+        for i, v := range arr </span><span class="cov8" title="1">{
+                key := uitoa(uint(i))
+                size += 1 + len(key) + 1 + valueSize(v)
+        }</span>
+        <span class="cov8" title="1">size++ // null
+        return size</span>
+}
+
+func appendElement(buf []byte, e Element) []byte <span class="cov8" title="1">{
+        buf = append(buf, byte(e.Value.Type))
+        buf = append(buf, e.Key...)
+        buf = append(buf, 0x00)
+        buf = appendValue(buf, e.Value)
+        return buf
+}</span>
+
+func appendValue(buf []byte, v Value) []byte <span class="cov8" title="1">{
+        switch v.Type </span>{
+        case TypeDouble:<span class="cov8" title="1">
+                var b [8]byte
+                math.Float64bits(v.value.(float64))
+                binary.LittleEndian.PutUint64(b[:], math.Float64bits(v.value.(float64)))
+                buf = append(buf, b[:]...)</span>
+        case TypeString:<span class="cov8" title="1">
+                s := v.value.(string)
+                buf = binary.LittleEndian.AppendUint32(buf, uint32(len(s)+1))
+                buf = append(buf, s...)
+                buf = append(buf, 0x00)</span>
+        case TypeDocument:<span class="cov8" title="1">
+                enc := Encode(v.value.(*Document))
+                buf = append(buf, enc...)</span>
+        case TypeArray:<span class="cov8" title="1">
+                buf = appendArray(buf, v.value.(Array))</span>
+        case TypeBinary:<span class="cov8" title="1">
+                b := v.value.(Binary)
+                buf = binary.LittleEndian.AppendUint32(buf, uint32(len(b.Data)))
+                buf = append(buf, byte(b.Subtype))
+                buf = append(buf, b.Data...)</span>
+        case TypeObjectID:<span class="cov8" title="1">
+                oid := v.value.(ObjectID)
+                buf = append(buf, oid[:]...)</span>
+        case TypeBoolean:<span class="cov8" title="1">
+                if v.value.(bool) </span><span class="cov8" title="1">{
+                        buf = append(buf, 0x01)
+                }</span> else<span class="cov8" title="1"> {
+                        buf = append(buf, 0x00)
+                }</span>
+        case TypeDateTime:<span class="cov8" title="1">
+                buf = binary.LittleEndian.AppendUint64(buf, uint64(v.value.(int64)))</span>
+        case TypeTimestamp:<span class="cov8" title="1">
+                buf = binary.LittleEndian.AppendUint64(buf, v.value.(uint64))</span>
+        case TypeNull:<span class="cov8" title="1"></span>
+                // no payload
+        case TypeRegex:<span class="cov8" title="1">
+                r := v.value.(Regex)
+                buf = append(buf, r.Pattern...)
+                buf = append(buf, 0x00)
+                buf = append(buf, r.Options...)
+                buf = append(buf, 0x00)</span>
+        case TypeDBPointer:<span class="cov0" title="0">
+                dp := v.value.(DBPointer)
+                buf = binary.LittleEndian.AppendUint32(buf, uint32(len(dp.Namespace)+1))
+                buf = append(buf, dp.Namespace...)
+                buf = append(buf, 0x00)
+                buf = append(buf, dp.ID[:]...)</span>
+        case TypeJavaScript:<span class="cov8" title="1">
+                s := v.value.(string)
+                buf = binary.LittleEndian.AppendUint32(buf, uint32(len(s)+1))
+                buf = append(buf, s...)
+                buf = append(buf, 0x00)</span>
+        case TypeSymbol:<span class="cov8" title="1">
+                s := v.value.(string)
+                buf = binary.LittleEndian.AppendUint32(buf, uint32(len(s)+1))
+                buf = append(buf, s...)
+                buf = append(buf, 0x00)</span>
+        case TypeCodeScope:<span class="cov0" title="0">
+                cs := v.value.(CodeWithScope)
+                scopeBytes := Encode(cs.Scope)
+                totalLen := 4 + 4 + len(cs.Code) + 1 + len(scopeBytes)
+                buf = binary.LittleEndian.AppendUint32(buf, uint32(totalLen))
+                buf = binary.LittleEndian.AppendUint32(buf, uint32(len(cs.Code)+1))
+                buf = append(buf, cs.Code...)
+                buf = append(buf, 0x00)
+                buf = append(buf, scopeBytes...)</span>
+        case TypeInt32:<span class="cov8" title="1">
+                buf = binary.LittleEndian.AppendUint32(buf, uint32(v.value.(int32)))</span>
+        case TypeInt64:<span class="cov8" title="1">
+                buf = binary.LittleEndian.AppendUint64(buf, uint64(v.value.(int64)))</span>
+        case TypeDecimal128:<span class="cov8" title="1">
+                // Store as 16 raw bytes
+                d := v.value.([16]byte)
+                buf = append(buf, d[:]...)</span>
+        case TypeMinKey, TypeMaxKey:<span class="cov8" title="1"></span>
+                // no payload
+        }
+        <span class="cov8" title="1">return buf</span>
+}
+
+func appendArray(buf []byte, arr Array) []byte <span class="cov8" title="1">{
+        // Calculate size
+        size := 4 // int32
+        for i, v := range arr </span><span class="cov8" title="1">{
+                key := uitoa(uint(i))
+                size += 1 + len(key) + 1 + valueSize(v)
+        }</span>
+        <span class="cov8" title="1">size++
+
+        start := len(buf)
+        buf = binary.LittleEndian.AppendUint32(buf, uint32(size))
+        for i, v := range arr </span><span class="cov8" title="1">{
+                buf = append(buf, byte(v.Type))
+                buf = append(buf, uitoa(uint(i))...)
+                buf = append(buf, 0x00)
+                buf = appendValue(buf, v)
+        }</span>
+        <span class="cov8" title="1">buf = append(buf, 0x00)
+
+        // Fix size
+        binary.LittleEndian.PutUint32(buf[start:], uint32(len(buf)-start))
+        return buf</span>
+}
+
+func uitoa(v uint) string <span class="cov8" title="1">{
+        if v == 0 </span><span class="cov8" title="1">{
+                return "0"
+        }</span>
+        <span class="cov8" title="1">var buf [20]byte
+        i := len(buf)
+        for v &gt; 0 </span><span class="cov8" title="1">{
+                i--
+                buf[i] = byte('0' + v%10)
+                v /= 10
+        }</span>
+        <span class="cov8" title="1">return string(buf[i:])</span>
+}
+</pre>
+		
+		<pre class="file" id="file5" style="display: none">package bson
+
+import (
+        "fmt"
+        "reflect"
+        "time"
+)
+
+// Marshal converts a Go struct to a BSON Document.
+func Marshal(v interface{}) (*Document, error) <span class="cov8" title="1">{
+        return marshalValue(reflect.ValueOf(v))
+}</span>
+
+func marshalValue(v reflect.Value) (*Document, error) <span class="cov8" title="1">{
+        // Dereference pointers
+        for v.Kind() == reflect.Ptr </span><span class="cov0" title="0">{
+                if v.IsNil() </span><span class="cov0" title="0">{
+                        return NewDocument(), nil
+                }</span>
+                <span class="cov0" title="0">v = v.Elem()</span>
+        }
+
+        <span class="cov8" title="1">if v.Kind() != reflect.Struct </span><span class="cov8" title="1">{
+                return nil, fmt.Errorf("bson: expected struct, got %s", v.Kind())
+        }</span>
+
+        <span class="cov8" title="1">doc := NewDocument()
+        t := v.Type()
+
+        for i := 0; i &lt; t.NumField(); i++ </span><span class="cov8" title="1">{
+                field := t.Field(i)
+                fieldValue := v.Field(i)
+
+                // Skip unexported fields
+                if !field.IsExported() </span><span class="cov0" title="0">{
+                        continue</span>
+                }
+
+                <span class="cov8" title="1">name := field.Tag.Get("bson")
+                if name == "" </span><span class="cov8" title="1">{
+                        name = field.Name
+                }</span>
+
+                // Handle omitempty
+                <span class="cov8" title="1">omitempty := false
+                if len(name) &gt; 0 &amp;&amp; name[len(name)-1] == ',' </span>{<span class="cov0" title="0">
+                        // Parse tag options
+                }</span>
+                <span class="cov8" title="1">if name == ",omitempty" </span><span class="cov8" title="1">{
+                        name = field.Name
+                        omitempty = true
+                }</span>
+
+                <span class="cov8" title="1">if omitempty &amp;&amp; isEmptyValue(fieldValue) </span><span class="cov8" title="1">{
+                        continue</span>
+                }
+
+                <span class="cov8" title="1">bsonVal, err := goValueToBSON(fieldValue)
+                if err != nil </span><span class="cov0" title="0">{
+                        return nil, fmt.Errorf("field %q: %w", name, err)
+                }</span>
+
+                <span class="cov8" title="1">doc.Set(name, bsonVal)</span>
+        }
+
+        <span class="cov8" title="1">return doc, nil</span>
+}
+
+func goValueToBSON(v reflect.Value) (Value, error) <span class="cov8" title="1">{
+        // Dereference pointers
+        for v.Kind() == reflect.Ptr </span><span class="cov8" title="1">{
+                if v.IsNil() </span><span class="cov8" title="1">{
+                        return VNull(), nil
+                }</span>
+                <span class="cov8" title="1">v = v.Elem()</span>
+        }
+
+        // Check for special types
+        <span class="cov8" title="1">if v.Type() == reflect.TypeOf(ObjectID{}) </span><span class="cov8" title="1">{
+                return Value{Type: TypeObjectID, value: v.Interface().(ObjectID)}, nil
+        }</span>
+        <span class="cov8" title="1">if v.Type() == reflect.TypeOf(time.Time{}) </span><span class="cov8" title="1">{
+                t := v.Interface().(time.Time)
+                return VDateTime(t.UnixMilli()), nil
+        }</span>
+
+        <span class="cov8" title="1">switch v.Kind() </span>{
+        case reflect.Bool:<span class="cov8" title="1">
+                return VBool(v.Bool()), nil</span>
+        case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32:<span class="cov8" title="1">
+                return VInt32(int32(v.Int())), nil</span>
+        case reflect.Int64:<span class="cov8" title="1">
+                return VInt64(v.Int()), nil</span>
+        case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32:<span class="cov8" title="1">
+                return VInt32(int32(v.Uint())), nil</span>
+        case reflect.Uint64:<span class="cov8" title="1">
+                return VInt64(int64(v.Uint())), nil</span>
+        case reflect.Float32, reflect.Float64:<span class="cov8" title="1">
+                return VDouble(v.Float()), nil</span>
+        case reflect.String:<span class="cov8" title="1">
+                return VString(v.String()), nil</span>
+        case reflect.Slice:<span class="cov8" title="1">
+                if v.IsNil() </span><span class="cov8" title="1">{
+                        return VNull(), nil
+                }</span>
+                <span class="cov8" title="1">if v.Type().Elem().Kind() == reflect.Uint8 </span><span class="cov8" title="1">{
+                        return Value{Type: TypeBinary, value: Binary{Subtype: BinaryGeneric, Data: v.Bytes()}}, nil
+                }</span>
+                <span class="cov8" title="1">arr := make(Array, v.Len())
+                for i := 0; i &lt; v.Len(); i++ </span><span class="cov8" title="1">{
+                        elem, err := goValueToBSON(v.Index(i))
+                        if err != nil </span><span class="cov0" title="0">{
+                                return Value{}, err
+                        }</span>
+                        <span class="cov8" title="1">arr[i] = elem</span>
+                }
+                <span class="cov8" title="1">return Value{Type: TypeArray, value: arr}, nil</span>
+        case reflect.Map:<span class="cov8" title="1">
+                if v.IsNil() </span><span class="cov8" title="1">{
+                        return VNull(), nil
+                }</span>
+                <span class="cov8" title="1">doc := NewDocument()
+                iter := v.MapRange()
+                for iter.Next() </span><span class="cov8" title="1">{
+                        key := iter.Key().String()
+                        elem, err := goValueToBSON(iter.Value())
+                        if err != nil </span><span class="cov0" title="0">{
+                                return Value{}, err
+                        }</span>
+                        <span class="cov8" title="1">doc.Set(key, elem)</span>
+                }
+                <span class="cov8" title="1">return Value{Type: TypeDocument, value: doc}, nil</span>
+        case reflect.Struct:<span class="cov8" title="1">
+                doc, err := marshalValue(v)
+                if err != nil </span><span class="cov0" title="0">{
+                        return Value{}, err
+                }</span>
+                <span class="cov8" title="1">return Value{Type: TypeDocument, value: doc}, nil</span>
+        case reflect.Interface:<span class="cov8" title="1">
+                if v.IsNil() </span><span class="cov8" title="1">{
+                        return VNull(), nil
+                }</span>
+                <span class="cov8" title="1">return goValueToBSON(v.Elem())</span>
+        }
+
+        <span class="cov8" title="1">return VNull(), nil</span>
+}
+
+func isEmptyValue(v reflect.Value) bool <span class="cov8" title="1">{
+        for v.Kind() == reflect.Ptr </span><span class="cov8" title="1">{
+                if v.IsNil() </span><span class="cov8" title="1">{
+                        return true
+                }</span>
+                <span class="cov8" title="1">v = v.Elem()</span>
+        }
+        <span class="cov8" title="1">switch v.Kind() </span>{
+        case reflect.Bool:<span class="cov8" title="1">
+                return !v.Bool()</span>
+        case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:<span class="cov8" title="1">
+                return v.Int() == 0</span>
+        case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:<span class="cov0" title="0">
+                return v.Uint() == 0</span>
+        case reflect.Float32, reflect.Float64:<span class="cov8" title="1">
+                return v.Float() == 0</span>
+        case reflect.String:<span class="cov8" title="1">
+                return v.String() == ""</span>
+        case reflect.Slice, reflect.Map:<span class="cov8" title="1">
+                return v.IsNil() || v.Len() == 0</span>
+        case reflect.Ptr:<span class="cov0" title="0">
+                return v.IsNil()</span>
+        }
+        <span class="cov0" title="0">return false</span>
+}
+</pre>
+		
+		<pre class="file" id="file6" style="display: none">package bson
+
+import (
+        "crypto/rand"
+        "encoding/binary"
+        "encoding/hex"
+        "errors"
+        "fmt"
+        "sync/atomic"
+        "time"
+)
+
+// ObjectID is a 12-byte unique identifier.
+// Layout: 4-byte timestamp + 5-byte random + 3-byte counter.
+type ObjectID [12]byte
+
+var (
+        objectidCounter uint32
+        objectidRandom  [5]byte
+)
+
+func init() <span class="cov8" title="1">{
+        // Initialize random bytes
+        _, _ = rand.Read(objectidRandom[:])
+        // Initialize counter with random value
+        var buf [4]byte
+        _, _ = rand.Read(buf[:])
+        objectidCounter = binary.BigEndian.Uint32(buf[:])
+}</span>
+
+// NewObjectID generates a new ObjectID.
+func NewObjectID() ObjectID <span class="cov8" title="1">{
+        var id ObjectID
+
+        // 4-byte timestamp (seconds since epoch)
+        ts := uint32(time.Now().Unix())
+        binary.BigEndian.PutUint32(id[0:4], ts)
+
+        // 5-byte random
+        copy(id[4:9], objectidRandom[:])
+
+        // 3-byte counter
+        c := atomic.AddUint32(&amp;objectidCounter, 1)
+        id[9] = byte(c &gt;&gt; 16)
+        id[10] = byte(c &gt;&gt; 8)
+        id[11] = byte(c)
+
+        return id
+}</span>
+
+// ObjectIDFromTimestamp creates an ObjectID with the given timestamp.
+func ObjectIDFromTimestamp(t time.Time) ObjectID <span class="cov8" title="1">{
+        var id ObjectID
+        binary.BigEndian.PutUint32(id[0:4], uint32(t.Unix()))
+        return id
+}</span>
+
+// Timestamp returns the timestamp portion of the ObjectID.
+func (id ObjectID) Timestamp() time.Time <span class="cov8" title="1">{
+        ts := binary.BigEndian.Uint32(id[0:4])
+        return time.Unix(int64(ts), 0)
+}</span>
+
+// String returns the hex encoding of the ObjectID.
+func (id ObjectID) String() string <span class="cov8" title="1">{
+        return hex.EncodeToString(id[:])
+}</span>
+
+// IsZero returns true if the ObjectID is all zeros.
+func (id ObjectID) IsZero() bool <span class="cov8" title="1">{
+        for _, b := range id </span><span class="cov8" title="1">{
+                if b != 0 </span><span class="cov8" title="1">{
+                        return false
+                }</span>
+        }
+        <span class="cov8" title="1">return true</span>
+}
+
+// MarshalHex returns the hex encoding.
+func (id ObjectID) MarshalHex() string <span class="cov8" title="1">{
+        return hex.EncodeToString(id[:])
+}</span>
+
+// ParseObjectID parses a 24-character hex string into an ObjectID.
+func ParseObjectID(s string) (ObjectID, error) <span class="cov8" title="1">{
+        var id ObjectID
+        if len(s) != 24 </span><span class="cov8" title="1">{
+                return id, fmt.Errorf("invalid ObjectID length: %d", len(s))
+        }</span>
+        <span class="cov8" title="1">b, err := hex.DecodeString(s)
+        if err != nil </span><span class="cov8" title="1">{
+                return id, fmt.Errorf("invalid ObjectID hex: %w", err)
+        }</span>
+        <span class="cov8" title="1">copy(id[:], b)
+        return id, nil</span>
+}
+
+// MustParseObjectID parses or panics.
+func MustParseObjectID(s string) ObjectID <span class="cov8" title="1">{
+        id, err := ParseObjectID(s)
+        if err != nil </span><span class="cov8" title="1">{
+                panic(err)</span>
+        }
+        <span class="cov8" title="1">return id</span>
+}
+
+// Equal returns true if two ObjectIDs are equal.
+func (id ObjectID) Equal(other ObjectID) bool <span class="cov8" title="1">{
+        return id == other
+}</span>
+
+// Bytes returns the raw bytes.
+func (id ObjectID) Bytes() []byte <span class="cov8" title="1">{
+        return id[:]
+}</span>
+
+var errInvalidObjectID = errors.New("invalid ObjectID")
+
+// MarshalBinary implements encoding.BinaryMarshaler.
+func (id ObjectID) MarshalBinary() ([]byte, error) <span class="cov8" title="1">{
+        b := make([]byte, 12)
+        copy(b, id[:])
+        return b, nil
+}</span>
+
+// UnmarshalBinary implements encoding.BinaryUnmarshaler.
+func (id *ObjectID) UnmarshalBinary(data []byte) error <span class="cov8" title="1">{
+        if len(data) != 12 </span><span class="cov8" title="1">{
+                return errInvalidObjectID
+        }</span>
+        <span class="cov8" title="1">copy(id[:], data)
+        return nil</span>
+}
+</pre>
+		
+		<pre class="file" id="file7" style="display: none">package bson
+
+import "encoding/binary"
+
+// RawDocument wraps raw BSON bytes for zero-copy field access.
+type RawDocument []byte
+
+// Length returns the document's declared byte length.
+func (r RawDocument) Length() int <span class="cov8" title="1">{
+        if len(r) &lt; 4 </span><span class="cov8" title="1">{
+                return 0
+        }</span>
+        <span class="cov8" title="1">return int(binary.LittleEndian.Uint32(r))</span>
+}
+
+// Lookup finds a field by key without full decode.
+func (r RawDocument) Lookup(key string) (Value, bool, error) <span class="cov8" title="1">{
+        if len(r) &lt; 5 </span><span class="cov8" title="1">{
+                return Value{}, false, nil
+        }</span>
+
+        <span class="cov8" title="1">size := int(binary.LittleEndian.Uint32(r))
+        if size &gt; len(r) </span><span class="cov8" title="1">{
+                return Value{}, false, nil
+        }</span>
+
+        <span class="cov8" title="1">pos := 4
+        for pos &lt; size-1 </span><span class="cov8" title="1">{
+                typ := BSONType(r[pos])
+                pos++
+
+                // Read key
+                k, err := readCString(r, &amp;pos)
+                if err != nil </span><span class="cov0" title="0">{
+                        return Value{}, false, err
+                }</span>
+
+                <span class="cov8" title="1">if k == key </span><span class="cov8" title="1">{
+                        val, err := decodeValue(r, &amp;pos, typ)
+                        return val, true, err
+                }</span>
+
+                // Skip value
+                <span class="cov8" title="1">if err := skipValue(r, &amp;pos, typ); err != nil </span><span class="cov0" title="0">{
+                        return Value{}, false, err
+                }</span>
+        }
+
+        <span class="cov8" title="1">return Value{}, false, nil</span>
+}
+
+// Values iterates all fields returning keys and raw type codes.
+func (r RawDocument) Values() []RawElement <span class="cov8" title="1">{
+        if len(r) &lt; 5 </span><span class="cov8" title="1">{
+                return nil
+        }</span>
+
+        <span class="cov8" title="1">size := int(binary.LittleEndian.Uint32(r))
+        pos := 4
+        var elems []RawElement
+
+        for pos &lt; size-1 </span><span class="cov8" title="1">{
+                typ := BSONType(r[pos])
+                pos++
+                key, err := readCString(r, &amp;pos)
+                if err != nil </span><span class="cov0" title="0">{
+                        break</span>
+                }
+                <span class="cov8" title="1">valueStart := pos
+                if err := skipValue(r, &amp;pos, typ); err != nil </span><span class="cov0" title="0">{
+                        break</span>
+                }
+                <span class="cov8" title="1">elems = append(elems, RawElement{
+                        Key:   key,
+                        Type:  typ,
+                        Value: r[valueStart:pos],
+                })</span>
+        }
+
+        <span class="cov8" title="1">return elems</span>
+}
+
+// RawElement represents a single element in a RawDocument.
+type RawElement struct {
+        Key   string
+        Type  BSONType
+        Value []byte
+}
+
+func skipValue(data []byte, pos *int, typ BSONType) error <span class="cov8" title="1">{
+        switch typ </span>{
+        case TypeDouble:<span class="cov0" title="0">
+                *pos += 8</span>
+        case TypeString:<span class="cov8" title="1">
+                if *pos+4 &gt; len(data) </span><span class="cov0" title="0">{
+                        return errBufferTooShort
+                }</span>
+                <span class="cov8" title="1">length := int(binary.LittleEndian.Uint32(data[*pos:]))
+                *pos += 4 + length</span>
+        case TypeDocument, TypeArray:<span class="cov8" title="1">
+                if *pos+4 &gt; len(data) </span><span class="cov0" title="0">{
+                        return errBufferTooShort
+                }</span>
+                <span class="cov8" title="1">size := int(binary.LittleEndian.Uint32(data[*pos:]))
+                *pos += size</span>
+        case TypeBinary:<span class="cov0" title="0">
+                if *pos+4 &gt; len(data) </span><span class="cov0" title="0">{
+                        return errBufferTooShort
+                }</span>
+                <span class="cov0" title="0">length := int(binary.LittleEndian.Uint32(data[*pos:]))
+                *pos += 4 + 1 + length</span>
+        case TypeObjectID:<span class="cov0" title="0">
+                *pos += 12</span>
+        case TypeBoolean:<span class="cov8" title="1">
+                *pos++</span>
+        case TypeDateTime:<span class="cov0" title="0">
+                *pos += 8</span>
+        case TypeTimestamp:<span class="cov0" title="0">
+                *pos += 8</span>
+        case TypeNull, TypeUndefined, TypeMinKey, TypeMaxKey:<span class="cov8" title="1"></span>
+                // no payload
+        case TypeRegex:<span class="cov0" title="0">
+                for *pos &lt; len(data) &amp;&amp; data[*pos] != 0x00 </span><span class="cov0" title="0">{
+                        *pos++
+                }</span>
+                <span class="cov0" title="0">*pos++ // null
+                for *pos &lt; len(data) &amp;&amp; data[*pos] != 0x00 </span><span class="cov0" title="0">{
+                        *pos++
+                }</span>
+                <span class="cov0" title="0">*pos++</span>
+        case TypeDBPointer:<span class="cov0" title="0">
+                if *pos+4 &gt; len(data) </span><span class="cov0" title="0">{
+                        return errBufferTooShort
+                }</span>
+                <span class="cov0" title="0">length := int(binary.LittleEndian.Uint32(data[*pos:]))
+                *pos += 4 + length + 12</span>
+        case TypeJavaScript, TypeSymbol:<span class="cov0" title="0">
+                if *pos+4 &gt; len(data) </span><span class="cov0" title="0">{
+                        return errBufferTooShort
+                }</span>
+                <span class="cov0" title="0">length := int(binary.LittleEndian.Uint32(data[*pos:]))
+                *pos += 4 + length</span>
+        case TypeCodeScope:<span class="cov0" title="0">
+                if *pos+4 &gt; len(data) </span><span class="cov0" title="0">{
+                        return errBufferTooShort
+                }</span>
+                <span class="cov0" title="0">size := int(binary.LittleEndian.Uint32(data[*pos:]))
+                *pos += size</span>
+        case TypeInt32:<span class="cov8" title="1">
+                *pos += 4</span>
+        case TypeInt64:<span class="cov8" title="1">
+                *pos += 8</span>
+        case TypeDecimal128:<span class="cov0" title="0">
+                *pos += 16</span>
+        default:<span class="cov0" title="0">
+                return errInvalidDocument</span>
+        }
+        <span class="cov8" title="1">return nil</span>
+}
+</pre>
+		
+		<pre class="file" id="file8" style="display: none">package bson
+
+import (
+        "fmt"
+        "reflect"
+        "time"
+)
+
+// Unmarshal decodes a BSON Document into a Go struct.
+// v must be a pointer to a struct.
+func Unmarshal(doc *Document, v interface{}) error <span class="cov8" title="1">{
+        rv := reflect.ValueOf(v)
+        if rv.Kind() != reflect.Ptr || rv.IsNil() </span><span class="cov8" title="1">{
+                return fmt.Errorf("bson: expected non-nil pointer, got %s", rv.Kind())
+        }</span>
+
+        <span class="cov8" title="1">rv = rv.Elem()
+        if rv.Kind() != reflect.Struct </span><span class="cov8" title="1">{
+                return fmt.Errorf("bson: expected struct pointer, got %s", rv.Kind())
+        }</span>
+
+        <span class="cov8" title="1">rt := rv.Type()
+        for i := 0; i &lt; rt.NumField(); i++ </span><span class="cov8" title="1">{
+                field := rt.Field(i)
+                if !field.IsExported() </span><span class="cov0" title="0">{
+                        continue</span>
+                }
+
+                <span class="cov8" title="1">name := field.Tag.Get("bson")
+                if name == "" || name == ",omitempty" </span><span class="cov8" title="1">{
+                        name = field.Name
+                }</span>
+
+                <span class="cov8" title="1">val, ok := doc.Get(name)
+                if !ok || val.IsNull() </span><span class="cov0" title="0">{
+                        continue</span>
+                }
+
+                <span class="cov8" title="1">fv := rv.Field(i)
+                if err := setField(fv, val); err != nil </span><span class="cov0" title="0">{
+                        return fmt.Errorf("field %q: %w", name, err)
+                }</span>
+        }
+
+        <span class="cov8" title="1">return nil</span>
+}
+
+func setField(fv reflect.Value, val Value) error <span class="cov8" title="1">{
+        // Dereference pointers
+        if fv.Kind() == reflect.Ptr </span><span class="cov0" title="0">{
+                if val.IsNull() </span><span class="cov0" title="0">{
+                        fv.Set(reflect.Zero(fv.Type()))
+                        return nil
+                }</span>
+                <span class="cov0" title="0">if fv.IsNil() </span><span class="cov0" title="0">{
+                        fv.Set(reflect.New(fv.Type().Elem()))
+                }</span>
+                <span class="cov0" title="0">fv = fv.Elem()</span>
+        }
+
+        // Special types
+        <span class="cov8" title="1">if fv.Type() == reflect.TypeOf(ObjectID{}) </span><span class="cov8" title="1">{
+                if val.Type == TypeObjectID </span><span class="cov8" title="1">{
+                        fv.Set(reflect.ValueOf(val.ObjectID()))
+                        return nil
+                }</span>
+                <span class="cov0" title="0">return fmt.Errorf("cannot assign %v to ObjectID", val.Type)</span>
+        }
+        <span class="cov8" title="1">if fv.Type() == reflect.TypeOf(time.Time{}) </span><span class="cov8" title="1">{
+                if val.Type == TypeDateTime </span><span class="cov8" title="1">{
+                        fv.Set(reflect.ValueOf(time.UnixMilli(val.DateTime())))
+                        return nil
+                }</span>
+                <span class="cov0" title="0">return fmt.Errorf("cannot assign %v to time.Time", val.Type)</span>
+        }
+
+        <span class="cov8" title="1">switch fv.Kind() </span>{
+        case reflect.Bool:<span class="cov8" title="1">
+                if val.Type == TypeBoolean </span><span class="cov8" title="1">{
+                        fv.SetBool(val.Boolean())
+                        return nil
+                }</span>
+        case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:<span class="cov8" title="1">
+                switch val.Type </span>{
+                case TypeInt32:<span class="cov8" title="1">
+                        fv.SetInt(int64(val.Int32()))
+                        return nil</span>
+                case TypeInt64:<span class="cov8" title="1">
+                        fv.SetInt(val.Int64())
+                        return nil</span>
+                case TypeDouble:<span class="cov0" title="0">
+                        fv.SetInt(int64(val.Double()))
+                        return nil</span>
+                }
+        case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:<span class="cov0" title="0">
+                switch val.Type </span>{
+                case TypeInt32:<span class="cov0" title="0">
+                        fv.SetUint(uint64(val.Int32()))
+                        return nil</span>
+                case TypeInt64:<span class="cov0" title="0">
+                        fv.SetUint(uint64(val.Int64()))
+                        return nil</span>
+                case TypeDouble:<span class="cov0" title="0">
+                        fv.SetUint(uint64(val.Double()))
+                        return nil</span>
+                }
+        case reflect.Float32, reflect.Float64:<span class="cov8" title="1">
+                switch val.Type </span>{
+                case TypeDouble:<span class="cov8" title="1">
+                        fv.SetFloat(val.Double())
+                        return nil</span>
+                case TypeInt32:<span class="cov0" title="0">
+                        fv.SetFloat(float64(val.Int32()))
+                        return nil</span>
+                case TypeInt64:<span class="cov0" title="0">
+                        fv.SetFloat(float64(val.Int64()))
+                        return nil</span>
+                }
+        case reflect.String:<span class="cov8" title="1">
+                if val.Type == TypeString </span><span class="cov8" title="1">{
+                        fv.SetString(val.String())
+                        return nil
+                }</span>
+        case reflect.Slice:<span class="cov8" title="1">
+                if fv.Type().Elem().Kind() == reflect.Uint8 &amp;&amp; val.Type == TypeBinary </span><span class="cov8" title="1">{
+                        fv.SetBytes(val.Binary().Data)
+                        return nil
+                }</span>
+                <span class="cov8" title="1">if val.Type == TypeArray </span><span class="cov8" title="1">{
+                        arr := val.ArrayValue()
+                        slice := reflect.MakeSlice(fv.Type(), len(arr), len(arr))
+                        for i, elem := range arr </span><span class="cov8" title="1">{
+                                if err := setField(slice.Index(i), elem); err != nil </span><span class="cov0" title="0">{
+                                        return err
+                                }</span>
+                        }
+                        <span class="cov8" title="1">fv.Set(slice)
+                        return nil</span>
+                }
+        case reflect.Map:<span class="cov0" title="0">
+                if val.Type == TypeDocument </span><span class="cov0" title="0">{
+                        innerDoc := val.DocumentValue()
+                        mapVal := reflect.MakeMapWithSize(fv.Type(), innerDoc.Len())
+                        for _, e := range innerDoc.Elements() </span><span class="cov0" title="0">{
+                                keyVal := reflect.ValueOf(e.Key)
+                                fieldType := fv.Type().Elem()
+                                fieldPtr := reflect.New(fieldType)
+                                if err := setField(fieldPtr.Elem(), e.Value); err != nil </span><span class="cov0" title="0">{
+                                        return err
+                                }</span>
+                                <span class="cov0" title="0">mapVal.SetMapIndex(keyVal, fieldPtr.Elem())</span>
+                        }
+                        <span class="cov0" title="0">fv.Set(mapVal)
+                        return nil</span>
+                }
+        case reflect.Struct:<span class="cov8" title="1">
+                if val.Type == TypeDocument </span><span class="cov8" title="1">{
+                        return Unmarshal(val.DocumentValue(), fv.Addr().Interface())
+                }</span>
+        case reflect.Interface:<span class="cov0" title="0">
+                fv.Set(reflect.ValueOf(val.Interface()))
+                return nil</span>
+        }
+
+        <span class="cov0" title="0">return fmt.Errorf("cannot assign %v to %s", val.Type, fv.Type())</span>
+}
+</pre>
+		
+		</div>
+	</body>
+	<script>
+	(function() {
+		var files = document.getElementById('files');
+		var visible;
+		files.addEventListener('change', onChange, false);
+		function select(part) {
+			if (visible)
+				visible.style.display = 'none';
+			visible = document.getElementById(part);
+			if (!visible)
+				return;
+			files.value = part;
+			visible.style.display = 'block';
+			location.hash = part;
+		}
+		function onChange() {
+			select(files.value);
+			window.scrollTo(0, 0);
+		}
+		if (location.hash != "") {
+			select(location.hash.substr(1));
+		}
+		if (!visible) {
+			select("file0");
+		}
+	})();
+	</script>
+</html>

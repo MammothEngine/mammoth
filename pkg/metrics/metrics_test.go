@@ -80,3 +80,26 @@ func TestExpoFormat(t *testing.T) {
 		t.Error("missing histogram count")
 	}
 }
+
+// Test Registry.Get
+func TestRegistry_Get(t *testing.T) {
+	reg := NewRegistry()
+	c := NewCounter("test_get_counter")
+	c.Add(42)
+	reg.Register(c)
+
+	// Get existing metric
+	m := reg.Get("test_get_counter")
+	if m == nil {
+		t.Fatal("expected non-nil metric")
+	}
+	if m.Name() != "test_get_counter" {
+		t.Errorf("expected name 'test_get_counter', got '%s'", m.Name())
+	}
+
+	// Get non-existent metric
+	m2 := reg.Get("non_existent")
+	if m2 != nil {
+		t.Error("expected nil for non-existent metric")
+	}
+}

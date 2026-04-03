@@ -73,6 +73,10 @@ type EngineInterface interface {
 	Put(key, value []byte) error
 	Delete(key []byte) error
 	Scan(prefix []byte, fn func(key, value []byte) bool) error
+}
+
+// Batcher is an optional interface for engines that support batch operations.
+type Batcher interface {
 	NewBatch() BatchInterface
 }
 
@@ -639,11 +643,42 @@ type engineAdapter struct {
 }
 
 func (a *engineAdapter) NewBatch() LogBatch {
-	return &batchAdapter{a.EngineInterface.NewBatch()}
+	if b, ok := a.EngineInterface.(Batcher); ok {
+		return &batchAdapter{b.NewBatch()}
+	}
+	// Fallback: return a simple batch that applies operations immediately
+	return &simpleBatch{eng: a.EngineInterface}
 }
 
 type batchAdapter struct {
 	BatchInterface
+}
+
+// simpleBatch implements LogBatch for engines without batch support.
+type simpleBatch struct {
+	eng EngineInterface
+	ops []func() error
+}
+
+func (b *simpleBatch) Put(key, value []byte) {
+	b.ops = append(b.ops, func() error {
+		return b.eng.Put(key, value)
+	})
+}
+
+func (b *simpleBatch) Delete(key []byte) {
+	b.ops = append(b.ops, func() error {
+		return b.eng.Delete(key)
+	})
+}
+
+func (b *simpleBatch) Commit() error {
+	for _, op := range b.ops {
+		if err := op(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // StepDown steps down as leader.

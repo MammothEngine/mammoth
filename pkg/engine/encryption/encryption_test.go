@@ -243,3 +243,277 @@ func TestMasterKeyFromFile(t *testing.T) {
 		t.Error("key mismatch")
 	}
 }
+
+// Test hexVal function
+func TestHexVal(t *testing.T) {
+	tests := []struct {
+		input    byte
+		expected int
+	}{
+		{'0', 0},
+		{'1', 1},
+		{'5', 5},
+		{'9', 9},
+		{'a', 10},
+		{'b', 11},
+		{'f', 15},
+		{'A', 10},
+		{'B', 11},
+		{'F', 15},
+		{'g', -1},    // invalid
+		{'z', -1},    // invalid
+		{'!', -1},    // invalid
+		{' ', -1},    // invalid
+		{0x00, -1},   // invalid
+		{0xFF, -1},   // invalid
+	}
+
+	for _, tt := range tests {
+		result := hexVal(tt.input)
+		if result != tt.expected {
+			t.Errorf("hexVal(%q) = %d, want %d", tt.input, result, tt.expected)
+		}
+	}
+}
+
+// Test hexByte function
+func TestHexByte(t *testing.T) {
+	tests := []struct {
+		h1       byte
+		h2       byte
+		expected int
+	}{
+		{'0', '0', 0},
+		{'0', 'F', 15},
+		{'F', '0', 240},
+		{'F', 'F', 255},
+		{'1', '2', 18},  // 0x12 = 18
+		{'a', 'b', 171}, // 0xAB = 171
+		{'A', 'B', 171}, // 0xAB = 171
+	}
+
+	for _, tt := range tests {
+		result := hexByte(tt.h1, tt.h2)
+		if result != tt.expected {
+			t.Errorf("hexByte(%q, %q) = %d, want %d", tt.h1, tt.h2, result, tt.expected)
+		}
+	}
+}
+
+// Test MasterKeyFromFile with non-existent file
+func TestMasterKeyFromFile_NotFound(t *testing.T) {
+	_, err := MasterKeyFromFile("/nonexistent/path/to/key")
+	if err == nil {
+		t.Error("expected error for non-existent file")
+	}
+}
+
+// Test MasterKeyFromFile with wrong size key
+func TestMasterKeyFromFile_WrongSize(t *testing.T) {
+	dir := t.TempDir()
+	keyFile := filepath.Join(dir, "master.key")
+
+	// Write 16 bytes instead of 32
+	os.WriteFile(keyFile, []byte("shortkey12345678"), 0600)
+
+	_, err := MasterKeyFromFile(keyFile)
+	if err == nil {
+		t.Error("expected error for wrong size key")
+	}
+
+	// Write 33 bytes instead of 32
+	os.WriteFile(keyFile, []byte("longkey012345678901234567890123456789"), 0600)
+
+	_, err = MasterKeyFromFile(keyFile)
+	if err == nil {
+		t.Error("expected error for wrong size key")
+	}
+}
+
+// Test KeyManager without key file (in-memory only)
+func TestKeyManager_NoKeyFile(t *testing.T) {
+	masterKey := make([]byte, 32)
+	rand.Read(masterKey)
+
+	// No key file - in-memory only
+	km, err := NewKeyManager(masterKey, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Should still work
+	enc, err := km.GetEncryptor("testdb")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pt := []byte("secret data")
+	ct, err := enc.Encrypt(pt)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dec, err := enc.Decrypt(ct)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !bytes.Equal(dec, pt) {
+		t.Error("in-memory key manager failed")
+	}
+}
+
+// Test saveKeys when keyFile is empty
+func TestKeyManager_SaveKeys_NoFile(t *testing.T) {
+	masterKey := make([]byte, 32)
+	rand.Read(masterKey)
+
+	km, _ := NewKeyManager(masterKey, "")
+
+	// saveKeys should return nil when no keyFile
+	err := km.saveKeys()
+	if err != nil {
+		t.Errorf("saveKeys should return nil when no keyFile: %v", err)
+	}
+}
+
+// Test loadKeys with invalid JSON
+func TestKeyManager_LoadKeys_InvalidJSON(t *testing.T) {
+	dir := t.TempDir()
+	keyFile := filepath.Join(dir, "keys.json")
+	masterKey := make([]byte, 32)
+	rand.Read(masterKey)
+
+	// Write invalid JSON
+	os.WriteFile(keyFile, []byte("not valid json"), 0600)
+
+	// Should still create KeyManager but loadKeys will fail silently
+	km, err := NewKeyManager(masterKey, keyFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// DEKs should be empty (failed to load)
+	if len(km.deks) != 0 {
+		t.Error("DEKs should be empty after failed load")
+	}
+}
+
+// Test loadKeys with non-existent file
+func TestKeyManager_LoadKeys_NoFile(t *testing.T) {
+	dir := t.TempDir()
+	keyFile := filepath.Join(dir, "nonexistent.json")
+	masterKey := make([]byte, 32)
+	rand.Read(masterKey)
+
+	// File doesn't exist - should create empty KeyManager
+	km, err := NewKeyManager(masterKey, keyFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Should work normally
+	enc, err := km.GetEncryptor("testdb")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pt := []byte("test")
+	ct, _ := enc.Encrypt(pt)
+	dec, _ := enc.Decrypt(ct)
+	if !bytes.Equal(dec, pt) {
+		t.Error("encryption failed after load from non-existent file")
+	}
+}
+
+// Test GetEncryptor for new database creates DEK
+func TestKeyManager_GetEncryptor_NewDB(t *testing.T) {
+	masterKey := make([]byte, 32)
+	rand.Read(masterKey)
+
+	km, _ := NewKeyManager(masterKey, "")
+
+	// Get encryptor for new DB
+	enc1, err := km.GetEncryptor("db1")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Get encryptor for another new DB
+	enc2, err := km.GetEncryptor("db2")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Should be different encryptors (different DEKs)
+	pt := []byte("test")
+	ct1, _ := enc1.Encrypt(pt)
+	ct2, _ := enc2.Encrypt(pt)
+
+	// Same plaintext should encrypt to different ciphertext
+	if bytes.Equal(ct1, ct2) {
+		t.Error("different DBs should have different ciphertexts")
+	}
+
+	// But each should decrypt correctly
+	dec1, _ := enc1.Decrypt(ct1)
+	dec2, _ := enc2.Decrypt(ct2)
+
+	if !bytes.Equal(dec1, pt) || !bytes.Equal(dec2, pt) {
+		t.Error("decryption failed")
+	}
+}
+
+// Test RotateDEKLocked directly
+func TestRotateDEKLocked(t *testing.T) {
+	dir := t.TempDir()
+	keyFile := filepath.Join(dir, "keys.json")
+	masterKey := make([]byte, 32)
+	rand.Read(masterKey)
+
+	km, _ := NewKeyManager(masterKey, keyFile)
+
+	// Rotate for new DB
+	err := km.RotateDEKLocked("testdb")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify DEK was created
+	if _, ok := km.deks["testdb"]; !ok {
+		t.Error("DEK should be created")
+	}
+
+	// Verify keys were persisted
+	if _, err := os.Stat(keyFile); err != nil {
+		t.Error("key file should be created after RotateDEKLocked")
+	}
+}
+
+// Test RotateDEK for non-existent DB
+func TestRotateDEK_NewDB(t *testing.T) {
+	masterKey := make([]byte, 32)
+	rand.Read(masterKey)
+
+	km, _ := NewKeyManager(masterKey, "")
+
+	// Rotate for DB that doesn't have a DEK yet
+	err := km.RotateDEK("newdb")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Should be able to get encryptor
+	enc, err := km.GetEncryptor("newdb")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Should work
+	pt := []byte("test")
+	ct, _ := enc.Encrypt(pt)
+	dec, _ := enc.Decrypt(ct)
+	if !bytes.Equal(dec, pt) {
+		t.Error("encryption after rotation failed")
+	}
+}

@@ -339,3 +339,214 @@ func TestDocument_SetGet_O1(t *testing.T) {
 		}
 	}
 }
+
+// Test Value type accessors with wrong type
+func TestValueAccessors_WrongType(t *testing.T) {
+	// Test that accessors return zero values for wrong types
+	v := Value{Type: TypeInt32, value: int32(42)}
+
+	if v.Double() != 0 {
+		t.Errorf("Double() on int32: expected 0, got %v", v.Double())
+	}
+	if v.String() != "" {
+		t.Errorf("String() on int32: expected empty, got %v", v.String())
+	}
+	if v.Int64() != 0 {
+		t.Errorf("Int64() on int32: expected 0, got %v", v.Int64())
+	}
+	if v.Boolean() != false {
+		t.Errorf("Boolean() on int32: expected false, got %v", v.Boolean())
+	}
+	if v.DateTime() != 0 {
+		t.Errorf("DateTime() on int32: expected 0, got %v", v.DateTime())
+	}
+	if v.Timestamp() != 0 {
+		t.Errorf("Timestamp() on int32: expected 0, got %v", v.Timestamp())
+	}
+	if !v.ObjectID().IsZero() {
+		t.Errorf("ObjectID() on int32: expected zero, got %v", v.ObjectID())
+	}
+	if v.Binary().Subtype != 0 || v.Binary().Data != nil {
+		t.Errorf("Binary() on int32: expected empty, got %v", v.Binary())
+	}
+	if v.DocumentValue() != nil {
+		t.Errorf("DocumentValue() on int32: expected nil, got %v", v.DocumentValue())
+	}
+	if v.ArrayValue() != nil {
+		t.Errorf("ArrayValue() on int32: expected nil, got %v", v.ArrayValue())
+	}
+	if v.Regex().Pattern != "" || v.Regex().Options != "" {
+		t.Errorf("Regex() on int32: expected empty, got %v", v.Regex())
+	}
+	if v.JavaScriptCode() != "" {
+		t.Errorf("JavaScriptCode() on int32: expected empty, got %v", v.JavaScriptCode())
+	}
+	if v.CodeScope().Code != "" || v.CodeScope().Scope != nil {
+		t.Errorf("CodeScope() on int32: expected empty, got %v", v.CodeScope())
+	}
+	if v.Symbol() != "" {
+		t.Errorf("Symbol() on int32: expected empty, got %v", v.Symbol())
+	}
+}
+
+// Test JavaScriptCode, CodeScope, Symbol accessors with correct types
+func TestValueAccessors_SpecialTypes(t *testing.T) {
+	// JavaScriptCode
+	jsVal := Value{Type: TypeJavaScript, value: "function() { return 1; }"}
+	if jsVal.JavaScriptCode() != "function() { return 1; }" {
+		t.Errorf("JavaScriptCode() mismatch: got %v", jsVal.JavaScriptCode())
+	}
+
+	// CodeScope
+	cwsVal := Value{Type: TypeCodeScope, value: CodeWithScope{Code: "code", Scope: NewDocument()}}
+	if cwsVal.CodeScope().Code != "code" {
+		t.Errorf("CodeScope().Code mismatch: got %v", cwsVal.CodeScope().Code)
+	}
+
+	// Symbol
+	symVal := Value{Type: TypeSymbol, value: "symbol_name"}
+	if symVal.Symbol() != "symbol_name" {
+		t.Errorf("Symbol() mismatch: got %v", symVal.Symbol())
+	}
+
+	// Timestamp
+	tsVal := Value{Type: TypeTimestamp, value: uint64(12345)}
+	if tsVal.Timestamp() != 12345 {
+		t.Errorf("Timestamp() mismatch: got %v", tsVal.Timestamp())
+	}
+}
+
+// Test Document.Get without index (linear search path)
+func TestDocumentGetWithoutIndex(t *testing.T) {
+	// Create document that doesn't use the index path
+	doc := &Document{elements: []Element{
+		{Key: "first", Value: VInt32(1)},
+		{Key: "second", Value: VInt32(2)},
+		{Key: "third", Value: VInt32(3)},
+	}}
+
+	// Get should work via linear search
+	v, ok := doc.Get("second")
+	if !ok || v.Int32() != 2 {
+		t.Errorf("Get without index: expected 2, got %v, ok=%v", v, ok)
+	}
+
+	// Missing key
+	v, ok = doc.Get("missing")
+	if ok {
+		t.Errorf("Get missing key: expected not found, got %v", v)
+	}
+}
+
+// Test Document.Delete without index
+func TestDocumentDeleteWithoutIndex(t *testing.T) {
+	doc := &Document{elements: []Element{
+		{Key: "first", Value: VInt32(1)},
+		{Key: "second", Value: VInt32(2)},
+		{Key: "third", Value: VInt32(3)},
+	}}
+
+	// Delete middle element
+	doc.Delete("second")
+	if doc.Len() != 2 {
+		t.Errorf("After delete: expected Len=2, got %d", doc.Len())
+	}
+	if _, ok := doc.Get("second"); ok {
+		t.Error("second should be deleted")
+	}
+
+	// Delete non-existent key (should not panic)
+	doc.Delete("missing")
+
+	// Delete first element
+	doc.Delete("first")
+	if doc.Len() != 1 {
+		t.Errorf("After second delete: expected Len=1, got %d", doc.Len())
+	}
+}
+
+// Test Document.Delete with index rebuild
+func TestDocumentDeleteWithIndex(t *testing.T) {
+	doc := NewDocument()
+	doc.Set("a", VInt32(1))
+	doc.Set("b", VInt32(2))
+	doc.Set("c", VInt32(3))
+	doc.Set("d", VInt32(4))
+
+	// Delete 'b' - should trigger index rebuild for shifted elements
+	doc.Delete("b")
+
+	// All remaining keys should still be accessible
+	if v, ok := doc.Get("a"); !ok || v.Int32() != 1 {
+		t.Error("a should be accessible")
+	}
+	if v, ok := doc.Get("c"); !ok || v.Int32() != 3 {
+		t.Error("c should be accessible")
+	}
+	if v, ok := doc.Get("d"); !ok || v.Int32() != 4 {
+		t.Error("d should be accessible")
+	}
+
+	// Keys order should be correct
+	keys := doc.Keys()
+	if len(keys) != 3 || keys[0] != "a" || keys[1] != "c" || keys[2] != "d" {
+		t.Errorf("keys order wrong: %v", keys)
+	}
+}
+
+// Test Document.Elements
+func TestDocument_Elements(t *testing.T) {
+	doc := NewDocument()
+	doc.Set("x", VInt32(1))
+	doc.Set("y", VInt32(2))
+
+	elems := doc.Elements()
+	if len(elems) != 2 {
+		t.Fatalf("expected 2 elements, got %d", len(elems))
+	}
+	if elems[0].Key != "x" || elems[0].Value.Int32() != 1 {
+		t.Errorf("first element wrong: %v", elems[0])
+	}
+	if elems[1].Key != "y" || elems[1].Value.Int32() != 2 {
+		t.Errorf("second element wrong: %v", elems[1])
+	}
+}
+
+// Test Document.String
+func TestDocument_String(t *testing.T) {
+	doc := NewDocument()
+	doc.Set("name", VString("test"))
+	doc.Set("value", VInt32(42))
+
+	s := doc.String()
+	if s == "" {
+		t.Error("String() returned empty")
+	}
+	// Should contain element info
+	if !bytes.Contains([]byte(s), []byte("name")) {
+		t.Error("String() should contain 'name'")
+	}
+}
+
+// Test Value.Interface
+func TestValue_Interface(t *testing.T) {
+	v := Value{Type: TypeInt32, value: int32(42)}
+	if v.Interface() != int32(42) {
+		t.Errorf("Interface() mismatch: got %v", v.Interface())
+	}
+}
+
+// Test Document.Has without index
+func TestDocumentHasWithoutIndex(t *testing.T) {
+	doc := &Document{elements: []Element{
+		{Key: "key1", Value: VInt32(1)},
+		{Key: "key2", Value: VInt32(2)},
+	}}
+
+	if !doc.Has("key1") {
+		t.Error("Has(key1) should be true")
+	}
+	if doc.Has("missing") {
+		t.Error("Has(missing) should be false")
+	}
+}

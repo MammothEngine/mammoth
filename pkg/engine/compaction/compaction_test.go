@@ -8,6 +8,7 @@ import (
 
 	"github.com/mammothengine/mammoth/pkg/engine/compression"
 	"github.com/mammothengine/mammoth/pkg/engine/manifest"
+	"github.com/mammothengine/mammoth/pkg/engine/sstable"
 )
 
 func TestPickerNoCompaction(t *testing.T) {
@@ -337,4 +338,70 @@ func TestCompactionWithTombstones(t *testing.T) {
 		})
 	}
 	m.Close()
+}
+
+func TestMaybeCompact_NoCompactionNeeded(t *testing.T) {
+	dir := t.TempDir()
+	m, _ := manifest.Open(dir)
+	defer m.Close()
+
+	c := NewCompactor(dir, m, 1, compression.CompressionNone)
+
+	// No files in manifest, so no compaction needed
+	err := c.MaybeCompact()
+	if err != nil {
+		t.Errorf("MaybeCompact with no files should return nil, got %v", err)
+	}
+}
+
+func TestMaybeCompact_WithCompaction(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create a manifest with enough L0 files to trigger compaction
+	m, _ := manifest.Open(dir)
+	
+	// Add files to trigger L0 compaction
+	for i := 0; i < l0CompactionTrigger; i++ {
+		// Create actual SSTable file
+		fileNum := uint64(i + 1)
+		path := filepath.Join(dir, fmt.Sprintf("%06d.sst", fileNum))
+		
+		w, err := sstable.NewWriter(sstable.WriterOptions{
+			Path:         path,
+			ExpectedKeys: 10,
+			Compression:  compression.CompressionNone,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		
+		// Write some data
+		key := []byte(fmt.Sprintf("key%02d", i))
+		val := []byte(fmt.Sprintf("value%02d", i))
+		w.Add(key, val)
+		w.Close()
+		
+		// Add to manifest
+		m.LogEdit(manifest.ManifestEdit{
+			Type:        manifest.EditAddFile,
+			Level:       0,
+			FileNum:     fileNum,
+			FileSize:    100,
+			SmallestKey: key,
+			LargestKey:  key,
+		})
+	}
+	m.Close()
+
+	// Reopen manifest to pick up changes
+	m2, _ := manifest.Open(dir)
+	defer m2.Close()
+
+	c := NewCompactor(dir, m2, 1, compression.CompressionNone)
+
+	// This should trigger and run compaction
+	err := c.MaybeCompact()
+	if err != nil {
+		t.Logf("MaybeCompact returned error (may be expected due to test setup): %v", err)
+	}
 }

@@ -77,3 +77,71 @@ func TestObjectIDBytes(t *testing.T) {
 		t.Fatalf("expected 12 bytes, got %d", len(b))
 	}
 }
+
+func TestObjectIDMarshalHex(t *testing.T) {
+	id := NewObjectID()
+	hex := id.MarshalHex()
+	if len(hex) != 24 {
+		t.Fatalf("expected 24 character hex string, got %d", len(hex))
+	}
+	// Verify it's valid hex
+	parsed, err := ParseObjectID(hex)
+	if err != nil {
+		t.Fatalf("MarshalHex produced invalid hex: %v", err)
+	}
+	if !id.Equal(parsed) {
+		t.Fatal("MarshalHex round-trip failed")
+	}
+}
+
+func TestMustParseObjectID(t *testing.T) {
+	id := NewObjectID()
+	s := id.String()
+
+	parsed := MustParseObjectID(s)
+	if !id.Equal(parsed) {
+		t.Fatal("MustParseObjectID failed for valid ID")
+	}
+
+	// Test panic on invalid
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("MustParseObjectID should panic on invalid input")
+		}
+	}()
+	MustParseObjectID("invalid")
+}
+
+func TestObjectIDMarshalBinary(t *testing.T) {
+	id := NewObjectID()
+	data, err := id.MarshalBinary()
+	if err != nil {
+		t.Fatalf("MarshalBinary failed: %v", err)
+	}
+	if len(data) != 12 {
+		t.Fatalf("expected 12 bytes, got %d", len(data))
+	}
+
+	// Verify round-trip
+	var parsed ObjectID
+	if err := parsed.UnmarshalBinary(data); err != nil {
+		t.Fatalf("UnmarshalBinary failed: %v", err)
+	}
+	if !id.Equal(parsed) {
+		t.Fatal("Binary round-trip failed")
+	}
+}
+
+func TestObjectIDUnmarshalBinaryInvalid(t *testing.T) {
+	var id ObjectID
+	// Wrong length
+	if err := id.UnmarshalBinary([]byte{1, 2, 3}); err == nil {
+		t.Fatal("expected error for wrong length")
+	}
+	// Correct length
+	data := make([]byte, 12)
+	copy(data, []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12})
+	if err := id.UnmarshalBinary(data); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}

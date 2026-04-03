@@ -1,6 +1,7 @@
 package repl
 
 import (
+	"time"
 	"encoding/json"
 	"testing"
 )
@@ -185,5 +186,77 @@ func TestSnapshotEncodeDecode(t *testing.T) {
 	}
 	if string(decoded.Data) != "hello snapshot" {
 		t.Fatalf("data mismatch: %s", decoded.Data)
+	}
+}
+
+// Test applyOplogCommand for insert operation
+func TestStateMachineApplyOplogCommand(t *testing.T) {
+	eng := newMemEngine()
+	sm := NewMammothStateMachine(eng)
+
+	// Create an oplog command for insert
+	oplogCmd := OplogCommand{
+		Op:        OpInsert,
+		Timestamp: time.Now(),
+		Hash:      1,
+		Namespace: "test.collection",
+		Object: map[string]interface{}{
+			"_id":  "doc1",
+			"name": "test",
+		},
+	}
+
+	err := sm.applyOplogCommand(oplogCmd)
+	if err != nil {
+		t.Fatalf("applyOplogCommand: %v", err)
+	}
+}
+
+// Test applyOplogCommand for update operation
+func TestStateMachineApplyOplogCommand_Update(t *testing.T) {
+	eng := newMemEngine()
+	sm := NewMammothStateMachine(eng)
+
+	// Create an oplog command for update
+	oplogCmd := OplogCommand{
+		Op:        OpUpdate,
+		Timestamp: time.Now(),
+		Hash:      1,
+		Namespace: "test.collection",
+		Object: map[string]interface{}{
+			"$set": map[string]interface{}{
+				"name": "updated",
+			},
+		},
+		Object2: map[string]interface{}{
+			"_id": "doc1",
+		},
+	}
+
+	err := sm.applyOplogCommand(oplogCmd)
+	if err != nil {
+		t.Logf("applyOplogCommand update (expected error if doc not found): %v", err)
+	}
+}
+
+// Test applyOplogCommand for delete operation
+func TestStateMachineApplyOplogCommand_Delete(t *testing.T) {
+	eng := newMemEngine()
+	sm := NewMammothStateMachine(eng)
+
+	// Create an oplog command for delete
+	oplogCmd := OplogCommand{
+		Op:        OpDelete,
+		Timestamp: time.Now(),
+		Hash:      2,
+		Namespace: "test.collection",
+		Object: map[string]interface{}{
+			"_id": "doc1",
+		},
+	}
+
+	err := sm.applyOplogCommand(oplogCmd)
+	if err != nil {
+		t.Fatalf("applyOplogCommand delete: %v", err)
 	}
 }

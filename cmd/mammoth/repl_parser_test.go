@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/mammothengine/mammoth/pkg/bson"
@@ -336,5 +337,68 @@ func TestParseArray(t *testing.T) {
 		if len(arr) != tc.wantLen {
 			t.Errorf("parseArray(%q) len = %d, want %d", tc.input, len(arr), tc.wantLen)
 		}
+	}
+}
+
+// Test parseObjectID
+func TestParseObjectID(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		pos       int
+		wantErr   bool
+		errMsg    string
+	}{
+		{
+			name:    "valid ObjectId",
+			input:   `"507f1f77bcf86cd799439011")`,
+			pos:     0,
+			wantErr: false,
+		},
+		{
+			name:    "invalid position",
+			input:   `abc`,
+			pos:     0,
+			wantErr: true,
+			errMsg:  `expected " in ObjectId()`,
+		},
+		{
+			name:    "unterminated string",
+			input:   `"507f1f77bcf86cd799439011`,
+			pos:     0,
+			wantErr: true,
+			errMsg:  `unterminated ObjectId string`,
+		},
+		{
+			name:    "invalid hex",
+			input:   `"invalidhex")`,
+			pos:     0,
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			val, newPos, err := parseObjectID(tc.input, tc.pos)
+			if tc.wantErr {
+				if err == nil {
+					t.Errorf("parseObjectID(%q) expected error, got nil", tc.input)
+				}
+				if tc.errMsg != "" && err != nil && !strings.Contains(err.Error(), tc.errMsg) {
+					t.Errorf("parseObjectID(%q) error = %v, want containing %q", tc.input, err, tc.errMsg)
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("parseObjectID(%q) unexpected error: %v", tc.input, err)
+				return
+			}
+			if val.Type != bson.TypeObjectID {
+				t.Errorf("parseObjectID(%q) type = %d, want ObjectID", tc.input, val.Type)
+			}
+			if newPos <= tc.pos {
+				t.Errorf("parseObjectID(%q) newPos = %d, should be > %d", tc.input, newPos, tc.pos)
+			}
+		})
 	}
 }

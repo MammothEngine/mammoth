@@ -131,3 +131,41 @@ func TestManifestRemoveFile(t *testing.T) {
 	}
 	m.Close()
 }
+
+// Test Version Files() method
+func TestVersion_Files(t *testing.T) {
+	v := NewVersion()
+
+	// Add some files
+	v.AddFile(0, FileMetadata{FileNum: 1, Size: 100, SmallestKey: []byte("a"), LargestKey: []byte("b")})
+	v.AddFile(0, FileMetadata{FileNum: 2, Size: 200, SmallestKey: []byte("c"), LargestKey: []byte("d")})
+	v.AddFile(1, FileMetadata{FileNum: 3, Size: 300, SmallestKey: []byte("e"), LargestKey: []byte("f")})
+
+	// Test Files() returns correct files for level 0
+	files0 := v.Files(0)
+	if len(files0) != 2 {
+		t.Errorf("Files(0) returned %d files, want 2", len(files0))
+	}
+
+	// Test Files() returns correct files for level 1
+	files1 := v.Files(1)
+	if len(files1) != 1 {
+		t.Errorf("Files(1) returned %d files, want 1", len(files1))
+	}
+
+	// Test Files() returns nil for invalid levels
+	filesNeg := v.Files(-1)
+	if filesNeg != nil {
+		t.Error("Files(-1) should return nil")
+	}
+
+	filesHigh := v.Files(7)
+	if filesHigh != nil {
+		t.Error("Files(7) should return nil")
+	}
+
+	// Verify file metadata is correct
+	if files0[0].FileNum != 1 && files0[0].FileNum != 2 {
+		t.Errorf("Unexpected FileNum: %d", files0[0].FileNum)
+	}
+}

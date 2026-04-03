@@ -432,3 +432,23 @@ func binaryLEPutUint32(b []byte, v uint32) {
 	b[2] = byte(v >> 16)
 	b[3] = byte(v >> 24)
 }
+
+// Test AllowKeyUpdate (no-op function for testing compatibility)
+func TestFilter_AllowKeyUpdate(t *testing.T) {
+	f := NewFilter(1000)
+	f.Insert([]byte("key1"))
+
+	// AllowKeyUpdate should be a no-op but should not panic
+	f.AllowKeyUpdate()
+
+	// Key should still be present
+	if !f.MayContain([]byte("key1")) {
+		t.Error("key1 should still be present after AllowKeyUpdate")
+	}
+
+	// Should be able to insert new keys
+	f.Insert([]byte("key2"))
+	if !f.MayContain([]byte("key2")) {
+		t.Error("key2 should be present after insertion")
+	}
+}

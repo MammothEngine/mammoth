@@ -208,3 +208,26 @@ func TestArenaMultipleNodes(t *testing.T) {
 		t.Fatalf("unexpected key at node3: %q", a.getKey(off3))
 	}
 }
+
+// Test Arena Bytes() method
+func TestArena_Bytes(t *testing.T) {
+	a := NewArena(1024)
+
+	// Bytes() should return the underlying buffer
+	buf := a.Bytes()
+	if buf == nil {
+		t.Fatal("Bytes() returned nil")
+	}
+	if len(buf) != 1024 {
+		t.Errorf("Bytes() length = %d, want 1024", len(buf))
+	}
+
+	// Allocate some data
+	a.allocateNode([]byte("test"), []byte("value"), 1)
+
+	// Bytes() should still return the same buffer
+	buf2 := a.Bytes()
+	if len(buf2) != 1024 {
+		t.Errorf("Bytes() length after allocation = %d, want 1024", len(buf2))
+	}
+}

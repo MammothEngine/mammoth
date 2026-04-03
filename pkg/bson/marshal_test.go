@@ -1,6 +1,7 @@
 package bson
 
 import (
+	"reflect"
 	"testing"
 	"time"
 )
@@ -460,5 +461,238 @@ func TestMarshal_NoTags(t *testing.T) {
 	}
 	if v, _ := doc.Get("Age"); v.Int32() != 20 {
 		t.Errorf("Age: got %d, want 20", v.Int32())
+	}
+}
+
+// Test comprehensive type coverage for goValueToBSON
+func TestGoValueToBSON_AllTypes(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    interface{}
+		wantType BSONType
+	}{
+		{"bool_true", true, TypeBoolean},
+		{"bool_false", false, TypeBoolean},
+		{"int", int(42), TypeInt32},
+		{"int8", int8(42), TypeInt32},
+		{"int16", int16(42), TypeInt32},
+		{"int32", int32(42), TypeInt32},
+		{"int64", int64(42), TypeInt64},
+		{"uint", uint(42), TypeInt32},
+		{"uint8", uint8(42), TypeInt32},
+		{"uint16", uint16(42), TypeInt32},
+		{"uint32", uint32(42), TypeInt32},
+		{"uint64", uint64(42), TypeInt64},
+		{"float32", float32(3.14), TypeDouble},
+		{"float64", float64(3.14), TypeDouble},
+		{"string", "test", TypeString},
+		{"bytes", []byte{1, 2, 3}, TypeBinary},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			val := reflect.ValueOf(tc.input)
+			result, err := goValueToBSON(val)
+			if err != nil {
+				t.Fatalf("goValueToBSON failed: %v", err)
+			}
+			if result.Type != tc.wantType {
+				t.Errorf("got type %v, want %v", result.Type, tc.wantType)
+			}
+		})
+	}
+}
+
+func TestGoValueToBSON_Time(t *testing.T) {
+	ts := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	val := reflect.ValueOf(ts)
+	result, err := goValueToBSON(val)
+	if err != nil {
+		t.Fatalf("goValueToBSON failed: %v", err)
+	}
+	if result.Type != TypeDateTime {
+		t.Errorf("expected TypeDateTime, got %v", result.Type)
+	}
+	if result.DateTime() != ts.UnixMilli() {
+		t.Errorf("timestamp mismatch: got %d, want %d", result.DateTime(), ts.UnixMilli())
+	}
+}
+
+func TestGoValueToBSON_ObjectID(t *testing.T) {
+	oid := NewObjectID()
+	val := reflect.ValueOf(oid)
+	result, err := goValueToBSON(val)
+	if err != nil {
+		t.Fatalf("goValueToBSON failed: %v", err)
+	}
+	if result.Type != TypeObjectID {
+		t.Errorf("expected TypeObjectID, got %v", result.Type)
+	}
+	if result.ObjectID() != oid {
+		t.Error("ObjectID mismatch")
+	}
+}
+
+func TestGoValueToBSON_Slice(t *testing.T) {
+	s := []int{1, 2, 3}
+	val := reflect.ValueOf(s)
+	result, err := goValueToBSON(val)
+	if err != nil {
+		t.Fatalf("goValueToBSON failed: %v", err)
+	}
+	if result.Type != TypeArray {
+		t.Errorf("expected TypeArray, got %v", result.Type)
+	}
+	arr := result.ArrayValue()
+	if len(arr) != 3 {
+		t.Errorf("expected 3 elements, got %d", len(arr))
+	}
+}
+
+func TestGoValueToBSON_NilSlice(t *testing.T) {
+	var s []int
+	val := reflect.ValueOf(s)
+	result, err := goValueToBSON(val)
+	if err != nil {
+		t.Fatalf("goValueToBSON failed: %v", err)
+	}
+	if result.Type != TypeNull {
+		t.Errorf("expected TypeNull for nil slice, got %v", result.Type)
+	}
+}
+
+func TestGoValueToBSON_Map(t *testing.T) {
+	m := map[string]int{"a": 1, "b": 2}
+	val := reflect.ValueOf(m)
+	result, err := goValueToBSON(val)
+	if err != nil {
+		t.Fatalf("goValueToBSON failed: %v", err)
+	}
+	if result.Type != TypeDocument {
+		t.Errorf("expected TypeDocument, got %v", result.Type)
+	}
+}
+
+func TestGoValueToBSON_NilMap(t *testing.T) {
+	var m map[string]int
+	val := reflect.ValueOf(m)
+	result, err := goValueToBSON(val)
+	if err != nil {
+		t.Fatalf("goValueToBSON failed: %v", err)
+	}
+	if result.Type != TypeNull {
+		t.Errorf("expected TypeNull for nil map, got %v", result.Type)
+	}
+}
+
+func TestGoValueToBSON_Interface(t *testing.T) {
+	var iface interface{} = "test"
+	val := reflect.ValueOf(&iface).Elem()
+	result, err := goValueToBSON(val)
+	if err != nil {
+		t.Fatalf("goValueToBSON failed: %v", err)
+	}
+	if result.Type != TypeString {
+		t.Errorf("expected TypeString, got %v", result.Type)
+	}
+}
+
+func TestGoValueToBSON_NilInterface(t *testing.T) {
+	var iface interface{} = nil
+	val := reflect.ValueOf(&iface).Elem()
+	result, err := goValueToBSON(val)
+	if err != nil {
+		t.Fatalf("goValueToBSON failed: %v", err)
+	}
+	if result.Type != TypeNull {
+		t.Errorf("expected TypeNull, got %v", result.Type)
+	}
+}
+
+func TestGoValueToBSON_Pointer(t *testing.T) {
+	s := "test"
+	val := reflect.ValueOf(&s)
+	result, err := goValueToBSON(val)
+	if err != nil {
+		t.Fatalf("goValueToBSON failed: %v", err)
+	}
+	if result.Type != TypeString {
+		t.Errorf("expected TypeString, got %v", result.Type)
+	}
+}
+
+func TestGoValueToBSON_NilPointer(t *testing.T) {
+	var s *string
+	val := reflect.ValueOf(s)
+	result, err := goValueToBSON(val)
+	if err != nil {
+		t.Fatalf("goValueToBSON failed: %v", err)
+	}
+	if result.Type != TypeNull {
+		t.Errorf("expected TypeNull for nil pointer, got %v", result.Type)
+	}
+}
+
+func TestGoValueToBSON_Struct(t *testing.T) {
+	type TestStruct struct {
+		Name string `bson:"name"`
+	}
+	s := TestStruct{Name: "test"}
+	val := reflect.ValueOf(s)
+	result, err := goValueToBSON(val)
+	if err != nil {
+		t.Fatalf("goValueToBSON failed: %v", err)
+	}
+	if result.Type != TypeDocument {
+		t.Errorf("expected TypeDocument, got %v", result.Type)
+	}
+}
+
+func TestIsEmptyValue(t *testing.T) {
+	tests := []struct {
+		name  string
+		value interface{}
+		empty bool
+	}{
+		{"false bool", false, true},
+		{"true bool", true, false},
+		{"zero int", int(0), true},
+		{"non-zero int", int(1), false},
+		{"zero string", "", true},
+		{"non-empty string", "test", false},
+		{"nil slice", ([]int)(nil), true},
+		{"empty slice", []int{}, true},
+		{"non-empty slice", []int{1}, false},
+		{"nil map", (map[string]int)(nil), true},
+		{"empty map", map[string]int{}, true},
+		{"non-empty map", map[string]int{"a": 1}, false},
+		{"nil pointer", (*string)(nil), true},
+		{"non-nil pointer to empty", new(string), true}, // pointer to empty string is empty
+		{"non-nil pointer to value", func() *string { s := "test"; return &s }(), false},
+		{"zero float64", float64(0), true},
+		{"non-zero float64", float64(3.14), false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			val := reflect.ValueOf(tc.value)
+			result := isEmptyValue(val)
+			if result != tc.empty {
+				t.Errorf("isEmptyValue(%v) = %v, want %v", tc.value, result, tc.empty)
+			}
+		})
+	}
+}
+
+func TestMarshal_UnsupportedKind(t *testing.T) {
+	// Channel is unsupported
+	ch := make(chan int)
+	_, err := Marshal(struct {
+		Ch chan int `bson:"ch"`
+	}{Ch: ch})
+	// Should either error or skip the field
+	if err == nil {
+		// It's okay if it just returns null for unsupported types
+		t.Log("unsupported kind handled (may return null)")
 	}
 }

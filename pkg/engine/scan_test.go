@@ -164,6 +164,71 @@ func TestEnginePrefixIterator(t *testing.T) {
 	}
 }
 
+// Test PrefixIterator Value() method
+func TestPrefixIterator_Value(t *testing.T) {
+	dir := tempDir(t)
+	e, err := Open(DefaultOptions(dir))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer e.Close()
+
+	// Insert some data with different values
+	e.Put([]byte("a:1"), []byte("value1"))
+	e.Put([]byte("a:2"), []byte("value2"))
+	e.Put([]byte("a:3"), []byte("value3"))
+
+	it := e.NewPrefixIterator([]byte("a:"))
+	defer it.Close()
+
+	// Test Value() returns correct values
+	expectedValues := map[string]string{
+		"a:1": "value1",
+		"a:2": "value2",
+		"a:3": "value3",
+	}
+
+	found := make(map[string]string)
+	for it.Next() {
+		key := string(it.Key())
+		val := string(it.Value())
+		found[key] = val
+	}
+
+	for k, v := range expectedValues {
+		if found[k] != v {
+			t.Errorf("Value for %s = %q, want %q", k, found[k], v)
+		}
+	}
+}
+
+// Test PrefixIterator Value() before Next() should return nil
+func TestPrefixIterator_ValueBeforeNext(t *testing.T) {
+	dir := tempDir(t)
+	e, err := Open(DefaultOptions(dir))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer e.Close()
+
+	e.Put([]byte("test:1"), []byte("value1"))
+
+	it := e.NewPrefixIterator([]byte("test:"))
+	defer it.Close()
+
+	// Value() before Next() should return nil
+	val := it.Value()
+	if val != nil {
+		t.Errorf("Value() before Next() = %v, want nil", val)
+	}
+
+	// Key() before Next() should also return nil
+	key := it.Key()
+	if key != nil {
+		t.Errorf("Key() before Next() = %v, want nil", key)
+	}
+}
+
 func TestEngineScanAfterFlush(t *testing.T) {
 	dir := tempDir(t)
 	opts := DefaultOptions(dir)

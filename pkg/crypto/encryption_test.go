@@ -205,6 +205,122 @@ func TestEncryptionConfig_Validate(t *testing.T) {
 	}
 }
 
+func TestProvider_IsEnabled(t *testing.T) {
+	tests := []struct {
+		name     string
+		config   EncryptionConfig
+		expected bool
+	}{
+		{
+			name:     "enabled",
+			config:   EncryptionConfig{EnableEncryption: true, Key: make([]byte, 32)},
+			expected: true,
+		},
+		{
+			name:     "disabled",
+			config:   EncryptionConfig{EnableEncryption: false},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			provider, err := NewProvider(tt.config)
+			if err != nil {
+				t.Fatalf("NewProvider failed: %v", err)
+			}
+
+			if provider.IsEnabled() != tt.expected {
+				t.Errorf("IsEnabled() = %v, want %v", provider.IsEnabled(), tt.expected)
+			}
+		})
+	}
+}
+
+func TestEncryptWithKey_DecryptWithKey(t *testing.T) {
+	key, _ := GenerateKey()
+	plaintext := []byte("secret data for key-specific encryption")
+
+	// Encrypt with specific key
+	ciphertext, err := EncryptWithKey(plaintext, key)
+	if err != nil {
+		t.Fatalf("EncryptWithKey failed: %v", err)
+	}
+
+	// Ciphertext should be different from plaintext
+	if bytes.Equal(ciphertext, plaintext) {
+		t.Error("Ciphertext should differ from plaintext")
+	}
+
+	// Decrypt with same key
+	decrypted, err := DecryptWithKey(ciphertext, key)
+	if err != nil {
+		t.Fatalf("DecryptWithKey failed: %v", err)
+	}
+
+	if !bytes.Equal(decrypted, plaintext) {
+		t.Error("Decrypted data doesn't match original")
+	}
+}
+
+func TestEncryptWithKey_InvalidKey(t *testing.T) {
+	plaintext := []byte("test data")
+
+	// Test with short key
+	_, err := EncryptWithKey(plaintext, make([]byte, 16))
+	if err != ErrInvalidKey {
+		t.Errorf("Expected ErrInvalidKey, got %v", err)
+	}
+
+	// Test with long key
+	_, err = EncryptWithKey(plaintext, make([]byte, 64))
+	if err != ErrInvalidKey {
+		t.Errorf("Expected ErrInvalidKey, got %v", err)
+	}
+}
+
+func TestDecryptWithKey_InvalidKey(t *testing.T) {
+	ciphertext := []byte("test data")
+
+	// Test with short key
+	_, err := DecryptWithKey(ciphertext, make([]byte, 16))
+	if err != ErrInvalidKey {
+		t.Errorf("Expected ErrInvalidKey, got %v", err)
+	}
+}
+
+func TestDecryptWithKey_CorruptData(t *testing.T) {
+	key, _ := GenerateKey()
+
+	// Test with data too short to contain nonce
+	_, err := DecryptWithKey([]byte("short"), key)
+	if err != ErrDecryptionFailed {
+		t.Errorf("Expected ErrDecryptionFailed for short data, got %v", err)
+	}
+
+	// Test with corrupted ciphertext (valid size but wrong content)
+	corruptData := make([]byte, 32) // Large enough for nonce + some data
+	_, err = DecryptWithKey(corruptData, key)
+	if err == nil {
+		t.Error("Expected error for corrupted data")
+	}
+}
+
+func TestDecryptWithKey_WrongKey(t *testing.T) {
+	key1, _ := GenerateKey()
+	key2, _ := GenerateKey()
+	plaintext := []byte("secret data")
+
+	// Encrypt with key1
+	ciphertext, _ := EncryptWithKey(plaintext, key1)
+
+	// Try to decrypt with key2
+	_, err := DecryptWithKey(ciphertext, key2)
+	if err == nil {
+		t.Error("Expected error when decrypting with wrong key")
+	}
+}
+
 func BenchmarkEncrypt(b *testing.B) {
 	key, _ := GenerateKey()
 	provider, _ := NewProvider(EncryptionConfig{
