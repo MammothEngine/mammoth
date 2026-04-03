@@ -27,3 +27,7 @@ Thumbs.db
 # Data directories (engine test artifacts)
 testdata/
 data/
+
+# Test data
+test_data/
+*.exe
