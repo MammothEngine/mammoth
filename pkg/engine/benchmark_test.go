@@ -163,8 +163,10 @@ func BenchmarkWAL_WriteAsync(b *testing.B) {
 	value := []byte("wal benchmark value data")
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		key := fmt.Appendf(nil, "wal_key_%d", i)
+	for i := range b.N {
+		// Cycle through keys to avoid running out of arena space
+		keyID := i % 100000
+		key := fmt.Appendf(nil, "wal_key_%d", keyID)
 		eng.Put(key, value)
 	}
 }
@@ -188,8 +190,10 @@ func BenchmarkWAL_WriteSync(b *testing.B) {
 	value := []byte("wal benchmark value data")
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		key := fmt.Appendf(nil, "wal_key_%d", i)
+	for i := range b.N {
+		// Cycle through keys to avoid running out of arena space
+		keyID := i % 100000
+		key := fmt.Appendf(nil, "wal_key_%d", keyID)
 		eng.Put(key, value)
 	}
 }
