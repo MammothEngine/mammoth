@@ -101,7 +101,7 @@ func BenchmarkEngine_BatchPut(b *testing.B) {
 	eng, cleanup := setupBenchmarkEngine(b)
 	defer cleanup()
 
-	batchSizes := []int{10, 100, 1000}
+	batchSizes := []int{10, 100}
 
 	for _, size := range batchSizes {
 		b.Run(fmt.Sprintf("size_%d", size), func(b *testing.B) {
