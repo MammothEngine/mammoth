@@ -25,6 +25,17 @@ Mammoth Engine is a production-ready document database that implements the Mongo
 - **Aggregation Pipeline** - Data processing and transformation
 - **TTL Indexes** - Automatic document expiration
 
+### Production Features
+
+- **🛡️ Circuit Breaker** - Fault tolerance with automatic failure detection
+- **⏱️ Rate Limiting** - Token bucket algorithm with per-connection and global limits
+- **🔄 Retry/Backoff** - Exponential backoff with jitter for resilient operations
+- **📊 Prometheus Metrics** - Built-in observability with metrics export
+- **🔌 Graceful Shutdown** - Zero-downtime deployments with connection draining
+- **🔍 Structured Logging** - Correlation IDs and request tracing
+- **🐛 pprof Profiling** - Built-in profiling endpoints for performance analysis
+- **✅ Health Checks** - Kubernetes-compatible liveness/readiness probes
+
 ## Quick Start
 
 ### Installation
@@ -186,35 +197,68 @@ sh.status()
 | Latency (P50) | 0.5ms | 1ms |
 | Latency (P99) | 2ms | 5ms |
 
-## Configuration
+### Monitoring
 
-```yaml
-# mammoth.conf
-server:
-  data_dir: "/var/lib/mammoth"
+- **Prometheus Metrics**: `http://localhost:9100/metrics`
+- **Health Checks**: `http://localhost:8080/health`
+- **pprof Profiling**: `http://localhost:6060/debug/pprof/` (optional)
 
-network:
-  bind_address: "0.0.0.0"
-  port: 27017
+```bash
+# Check server health
+curl http://localhost:8080/health
 
-storage:
-  memtable_size: 67108864  # 64 MB
-  cache_size: 268435456    # 256 MB
+# View Prometheus metrics
+curl http://localhost:9100/metrics | grep mammoth_commands_total
 
-auth:
-  enabled: true
-
-tls:
-  enabled: true
-  cert_file: "/etc/mammoth/server.crt"
-  key_file: "/etc/mammoth/server.key"
-
-logging:
-  level: "info"
-  file: "/var/log/mammoth/mammoth.log"
+# CPU profile (30 seconds)
+go tool pprof http://localhost:6060/debug/pprof/profile?seconds=30
 ```
 
-See [Configuration Guide](docs/CONFIGURATION.md) for complete reference.
+## Configuration
+
+```toml
+# mammoth.toml
+[server]
+data-dir = "/var/lib/mammoth"
+bind-addr = "0.0.0.0:27017"
+admin-bind-addr = "0.0.0.0:8080"
+query-timeout = "30s"
+
+[storage]
+memtable-size = "64MB"
+cache-size = "256MB"
+
+[auth]
+enabled = true
+
+[tls]
+enabled = true
+cert-file = "/etc/mammoth/server.crt"
+key-file = "/etc/mammoth/server.key"
+
+[logging]
+level = "info"
+file = "/var/log/mammoth/mammoth.log"
+
+# Production Features
+[server.rate-limit]
+enabled = true
+requests-per-second = 1000
+burst = 100
+global-rate = 10000
+
+[server.circuit-breaker]
+enabled = true
+failure-threshold = 5
+success-threshold = 3
+timeout = "30s"
+
+[metrics]
+enabled = true
+bind-addr = "0.0.0.0:9100"
+```
+
+See [PRODUCTION_README.md](PRODUCTION_README.md) for production deployment guide.
 
 ## Documentation
 
@@ -271,9 +315,18 @@ go test ./tests/... -bench=. -benchmem
 - [x] Sharding
 - [x] ACID transactions
 - [x] Change streams
+- [x] **Production Features** ✅
+  - [x] Circuit Breaker
+  - [x] Rate Limiting
+  - [x] Retry/Backoff
+  - [x] Prometheus Metrics
+  - [x] Graceful Shutdown
+  - [x] Structured Logging
+  - [x] Health Checks
+  - [x] pprof Profiling
 - [ ] Full aggregation operator set
 - [ ] Query optimizer improvements
-- [ ] Cloud-native features
+- [ ] Cloud-native features (Kubernetes operator)
 
 ## Contributing
 
@@ -303,6 +356,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ---
 
-**Status:** 0.0.1 Alpha - Early Development
+**Status:** 0.1.0 Beta - Production Ready
 
-Last Updated: 2026-04-01
+Last Updated: 2026-04-03
