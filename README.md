@@ -14,7 +14,7 @@ Mammoth Engine is a production-ready document database that implements the Mongo
 
 ### Key Features
 
-- **MongoDB Compatibility** - Drop-in replacement for MongoDB applications
+- **✅ Real MongoDB Driver Support** - Works with official MongoDB drivers (Go, Node.js, Python, etc.)
 - **LSM-Tree Storage** - High-performance write-optimized storage engine
 - **ACID Transactions** - Multi-document transaction support with snapshot isolation
 - **Replication** - Raft-based consensus for high availability
