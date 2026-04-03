@@ -191,8 +191,6 @@ func (h *Handler) HandleWithContext(ctx context.Context, msg *Message) *bson.Doc
 		return errResponseWithCode("unknown", "empty command", CodeBadValue)
 	}
 
-	h.log.Debug("command", logging.FString("cmd", cmd), logging.FString("remote", msg.RemoteAddr))
-
 	// Setup request context with correlation and request IDs
 	if logging.GetCorrelationID(ctx) == "" {
 		ctx = logging.WithCorrelationID(ctx, "")
@@ -303,11 +301,11 @@ func (h *Handler) executeCommand(ctx context.Context, cmd string, body *bson.Doc
 	case "find":
 		return h.handleFind(body)
 	case "insert":
-		return h.handleInsert(body)
+		return h.handleInsert(msg, body)
 	case "update":
-		return h.handleUpdate(body)
+		return h.handleUpdate(msg, body)
 	case "delete":
-		return h.handleDelete(body)
+		return h.handleDelete(msg, body)
 	case "getMore":
 		return h.handleGetMore(body)
 	case "killCursors":

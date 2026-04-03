@@ -97,9 +97,12 @@ func (h *Handler) handleFind(body *bson.Document) *bson.Document {
 	return doc
 }
 
-func (h *Handler) handleInsert(body *bson.Document) *bson.Document {
+func (h *Handler) handleInsert(msg *Message, body *bson.Document) *bson.Document {
 	collName := extractCollection(body)
 	db := extractDB(body)
+	if db == "" {
+		return errResponseWithCode("insert", "database name required", CodeBadValue)
+	}
 	if collName == "" {
 		return errResponseWithCode("insert", "collection name required", CodeBadValue)
 	}
@@ -108,6 +111,8 @@ func (h *Handler) handleInsert(body *bson.Document) *bson.Document {
 	coll := mongo.NewCollection(db, collName, h.engine, h.cat)
 
 	var docs []*bson.Document
+
+	// First try to get documents from the body (legacy format)
 	if arr := getArrayFromBody(body, "documents"); arr != nil {
 		for _, v := range arr {
 			if v.Type == bson.TypeDocument {
@@ -115,6 +120,18 @@ func (h *Handler) handleInsert(body *bson.Document) *bson.Document {
 			}
 		}
 	}
+
+	// Also check for documents in kind-1 sections (OP_MSG document sequence)
+	if len(docs) == 0 {
+		if rawDocs := msg.GetDocumentSequence("documents"); rawDocs != nil {
+			for _, raw := range rawDocs {
+				if doc, err := bson.Decode(raw); err == nil {
+					docs = append(docs, doc)
+				}
+			}
+		}
+	}
+
 
 	// Validate documents against collection schema
 	if validator, err := h.cat.GetValidator(db, collName); err == nil && validator != nil {
@@ -149,7 +166,7 @@ func (h *Handler) handleInsert(body *bson.Document) *bson.Document {
 	return doc
 }
 
-func (h *Handler) handleUpdate(body *bson.Document) *bson.Document {
+func (h *Handler) handleUpdate(msg *Message, body *bson.Document) *bson.Document {
 	collName := extractCollection(body)
 	db := extractDB(body)
 	if collName == "" {
@@ -159,7 +176,17 @@ func (h *Handler) handleUpdate(body *bson.Document) *bson.Document {
 	_ = h.cat.EnsureCollection(db, collName)
 	coll := mongo.NewCollection(db, collName, h.engine, h.cat)
 
+	// Get updates from body or document sequence
 	updates := getArrayFromBody(body, "updates")
+	if len(updates) == 0 {
+		if rawDocs := msg.GetDocumentSequence("updates"); rawDocs != nil {
+			for _, raw := range rawDocs {
+				if doc, err := bson.Decode(raw); err == nil {
+					updates = append(updates, bson.VDoc(doc))
+				}
+			}
+		}
+	}
 	var matched, modified int32
 	var upsertedIDs []bson.Value
 
@@ -279,7 +306,7 @@ func (h *Handler) handleUpdate(body *bson.Document) *bson.Document {
 	return doc
 }
 
-func (h *Handler) handleDelete(body *bson.Document) *bson.Document {
+func (h *Handler) handleDelete(msg *Message, body *bson.Document) *bson.Document {
 	collName := extractCollection(body)
 	db := extractDB(body)
 	if collName == "" {
@@ -293,7 +320,17 @@ func (h *Handler) handleDelete(body *bson.Document) *bson.Document {
 
 	_ = h.cat.EnsureCollection(db, collName)
 
+	// Get deletes from body or document sequence
 	deletes := getArrayFromBody(body, "deletes")
+	if len(deletes) == 0 {
+		if rawDocs := msg.GetDocumentSequence("deletes"); rawDocs != nil {
+			for _, raw := range rawDocs {
+				if doc, err := bson.Decode(raw); err == nil {
+					deletes = append(deletes, bson.VDoc(doc))
+				}
+			}
+		}
+	}
 	var deleted int32
 
 	for _, d := range deletes {
@@ -305,6 +342,9 @@ func (h *Handler) handleDelete(body *bson.Document) *bson.Document {
 		if filter == nil {
 			continue
 		}
+
+		// Check limit: 0 = delete all matching, 1 = delete first matching
+		limit := getInt32FromBody(delDoc, "limit")
 
 		matcher := mongo.NewMatcher(filter)
 		prefix := mongo.EncodeNamespacePrefix(db, collName)
@@ -319,6 +359,10 @@ func (h *Handler) handleDelete(body *bson.Document) *bson.Document {
 			if matcher.Match(doc) {
 				keys = append(keys, append([]byte{}, key...))
 				deletedDocs = append(deletedDocs, doc)
+				// If limit is 1, stop after first match
+				if limit == 1 {
+					return false
+				}
 			}
 			return true
 		})

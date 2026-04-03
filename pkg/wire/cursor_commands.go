@@ -18,7 +18,14 @@ func (h *Handler) handleGetMore(body *bson.Document) *bson.Document {
 
 	cursor, ok := h.cursor.Get(id)
 	if !ok {
-		return errResponseWithCode("getMore", "cursor not found", CodeBadValue)
+		// Cursor not found - return empty result with cursor id 0
+		cursorDoc := bson.NewDocument()
+		cursorDoc.Set("nextBatch", bson.VArray(bson.Array{}))
+		cursorDoc.Set("id", bson.VInt64(0))
+		cursorDoc.Set("ns", bson.VString(ns))
+		doc := okDoc()
+		doc.Set("cursor", bson.VDoc(cursorDoc))
+		return doc
 	}
 
 	batchSize := getInt32FromBody(body, "batchSize")
@@ -28,9 +35,18 @@ func (h *Handler) handleGetMore(body *bson.Document) *bson.Document {
 
 	batch := cursor.GetBatch(int(batchSize))
 
+	// Check if cursor is exhausted - return id 0 to signal end
+	var nextCursorID int64
+	if cursor.Exhausted() {
+		nextCursorID = 0
+		h.cursor.Kill([]uint64{id}) // Clean up exhausted cursor
+	} else {
+		nextCursorID = int64(cursor.ID())
+	}
+
 	cursorDoc := bson.NewDocument()
 	cursorDoc.Set("nextBatch", bson.VArray(docsToValues(batch)))
-	cursorDoc.Set("id", bson.VInt64(int64(cursor.ID())))
+	cursorDoc.Set("id", bson.VInt64(nextCursorID))
 	cursorDoc.Set("ns", bson.VString(ns))
 
 	doc := okDoc()

@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/mammothengine/mammoth/pkg/bson"
 	"github.com/mammothengine/mammoth/pkg/logging"
 	"github.com/mammothengine/mammoth/pkg/metrics"
 )
@@ -189,7 +190,12 @@ func (s *Server) handleConn(conn net.Conn) {
 			}
 			return
 		}
-		if msg == nil || msg.Msg == nil {
+		if msg == nil {
+			continue
+		}
+
+		// Handle both OP_MSG and OP_QUERY
+		if msg.Msg == nil && msg.Query == nil {
 			continue
 		}
 
@@ -197,7 +203,15 @@ func (s *Server) handleConn(conn net.Conn) {
 		msg.ConnID = cid
 		response := s.handler.Handle(msg)
 		if response != nil {
-			if err := WriteMessage(conn, msg.Header.RequestID, 0, response); err != nil {
+			var writeErr error
+			if msg.Header.OpCode == OpQuery {
+				// Use OP_REPLY for OP_QUERY requests
+				writeErr = WriteOpReply(conn, msg.Header.RequestID, 0, []*bson.Document{response})
+			} else {
+				// Use OP_MSG for OP_MSG requests
+				writeErr = WriteMessage(conn, msg.Header.RequestID, 0, response)
+			}
+			if writeErr != nil {
 				return
 			}
 		}

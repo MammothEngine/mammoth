@@ -22,23 +22,42 @@ func ReadMessage(conn net.Conn) (*Message, error) {
 	header.ResponseTo = binary.LittleEndian.Uint32(headerBuf[8:12])
 	header.OpCode = binary.LittleEndian.Uint32(headerBuf[12:16])
 
-	if header.OpCode != OpMsg {
-		return nil, nil // Skip non-OP_MSG
-	}
-
 	// Read remaining bytes
 	remaining := int(header.Length) - headerSize
-	if remaining <= 0 {
+	if remaining < 0 {
 		return nil, nil
 	}
 
-	body := make([]byte, remaining)
-	if _, err := io.ReadFull(conn, body); err != nil {
-		return nil, err
+	var body []byte
+	if remaining > 0 {
+		body = make([]byte, remaining)
+		if _, err := io.ReadFull(conn, body); err != nil {
+			return nil, err
+		}
+	}
+
+	msg := &Message{
+		Header: header,
+	}
+
+	switch header.OpCode {
+	case OpMsg:
+		return parseOpMsg(msg, body)
+	case OpQuery:
+		return parseOpQuery(msg, body)
+	default:
+		// For other opcodes, return nil (not supported yet)
+		return nil, nil
+	}
+}
+
+func parseOpMsg(msg *Message, body []byte) (*Message, error) {
+	if len(body) < 4 {
+		return nil, nil
 	}
 
 	// Parse OP_MSG
-	msg := &OPMsg{
+	opMsg := &OPMsg{
 		FlagBits: binary.LittleEndian.Uint32(body[0:4]),
 	}
 	pos := 4
@@ -60,7 +79,7 @@ func ReadMessage(conn net.Conn) (*Message, error) {
 			if err != nil {
 				goto done
 			}
-			msg.Sections = append(msg.Sections, Section{
+			opMsg.Sections = append(opMsg.Sections, Section{
 				Kind: 0,
 				Body: doc,
 			})
@@ -93,7 +112,7 @@ func ReadMessage(conn net.Conn) (*Message, error) {
 				docs = append(docs, append([]byte{}, body[pos:pos+d]...))
 				pos += d
 			}
-			msg.Sections = append(msg.Sections, Section{
+			opMsg.Sections = append(opMsg.Sections, Section{
 				Kind:       1,
 				Identifier: identifier,
 				DocSeq: &DocSequence{
@@ -106,8 +125,73 @@ func ReadMessage(conn net.Conn) (*Message, error) {
 	}
 
 done:
-	return &Message{
-		Header: header,
-		Msg:    msg,
-	}, nil
+	msg.Msg = opMsg
+	return msg, nil
+}
+
+func parseOpQuery(msg *Message, body []byte) (*Message, error) {
+	if len(body) < 16 {
+		return nil, nil
+	}
+
+	query := &OPQuery{}
+	pos := 0
+
+	// Flags (4 bytes)
+	query.Flags = int32(binary.LittleEndian.Uint32(body[pos:]))
+	pos += 4
+
+	// Full collection name (null-terminated string)
+	nameStart := pos
+	for pos < len(body) && body[pos] != 0 {
+		pos++
+	}
+	if pos >= len(body) {
+		return nil, nil
+	}
+	query.FullCollectionName = string(body[nameStart:pos])
+	pos++ // skip null
+
+	if pos+8 > len(body) {
+		return nil, nil
+	}
+
+	// Number to skip (4 bytes)
+	query.NumberToSkip = int32(binary.LittleEndian.Uint32(body[pos:]))
+	pos += 4
+
+	// Number to return (4 bytes)
+	query.NumberToReturn = int32(binary.LittleEndian.Uint32(body[pos:]))
+	pos += 4
+
+	// Query document
+	if pos+4 > len(body) {
+		return nil, nil
+	}
+	queryDocSize := int(binary.LittleEndian.Uint32(body[pos:]))
+	if pos+queryDocSize > len(body) {
+		return nil, nil
+	}
+	queryDoc, err := bson.Decode(body[pos : pos+queryDocSize])
+	if err != nil {
+		return nil, nil
+	}
+	query.Query = queryDoc
+	pos += queryDocSize
+
+	// Optional: ReturnFieldsSelector
+	if pos < len(body) {
+		if pos+4 <= len(body) {
+			selectorDocSize := int(binary.LittleEndian.Uint32(body[pos:]))
+			if pos+selectorDocSize <= len(body) {
+				selectorDoc, err := bson.Decode(body[pos : pos+selectorDocSize])
+				if err == nil {
+					query.ReturnFieldsSelector = selectorDoc
+				}
+			}
+		}
+	}
+
+	msg.Query = query
+	return msg, nil
 }
