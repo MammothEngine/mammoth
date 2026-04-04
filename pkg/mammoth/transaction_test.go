@@ -136,3 +136,58 @@ func TestIsConflictError(t *testing.T) {
 		t.Error("expected nil to not be conflict")
 	}
 }
+
+// TestWithTransactionContextCancellation tests context cancellation during transaction
+func TestWithTransactionContextCancellation(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Cancel immediately
+	cancel()
+
+	err := db.WithTransaction(ctx, func(tx *Transaction) error {
+		return nil
+	})
+
+	if err == nil {
+		t.Error("expected error when context is cancelled")
+	}
+}
+
+// TestWithTransactionTimeout tests transaction with context timeout
+func TestWithTransactionTimeout(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+
+	// Very short timeout to trigger deadline
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Nanosecond)
+	defer cancel()
+
+	time.Sleep(10 * time.Millisecond) // Ensure timeout passes
+
+	err := db.WithTransaction(ctx, func(tx *Transaction) error {
+		return nil
+	})
+
+	if err == nil {
+		t.Error("expected error when context deadline exceeded")
+	}
+}
+
+// TestWithTransactionUserError tests transaction when user function returns error
+func TestWithTransactionUserError(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+
+	customErr := fmt.Errorf("user function error")
+
+	err := db.WithTransaction(context.Background(), func(tx *Transaction) error {
+		return customErr
+	})
+
+	if err != customErr {
+		t.Errorf("expected %v, got %v", customErr, err)
+	}
+}

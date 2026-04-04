@@ -340,6 +340,116 @@ func TestParseArray(t *testing.T) {
 	}
 }
 
+func TestParseValue(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantErr bool
+		check   func(bson.Value) bool
+	}{
+		{
+			name:    "empty string error",
+			input:   "",
+			wantErr: true,
+		},
+		{
+			name:    "unterminated string",
+			input:   `"unterminated`,
+			wantErr: true,
+		},
+		{
+			name:  "nested document",
+			input: `{inner: "value"}`,
+			check: func(v bson.Value) bool {
+				return v.Type == bson.TypeDocument
+			},
+		},
+		{
+			name:  "empty array",
+			input: `[]`,
+			check: func(v bson.Value) bool {
+				return v.Type == bson.TypeArray && len(v.ArrayValue()) == 0
+			},
+		},
+		{
+			name:  "array with values",
+			input: `[1, 2, 3]`,
+			check: func(v bson.Value) bool {
+				return v.Type == bson.TypeArray && len(v.ArrayValue()) == 3
+			},
+		},
+		{
+			name:  "null",
+			input: `null`,
+			check: func(v bson.Value) bool {
+				return v.Type == bson.TypeNull
+			},
+		},
+		{
+			name:  "true",
+			input: `true`,
+			check: func(v bson.Value) bool {
+				return v.Type == bson.TypeBoolean && v.Boolean() == true
+			},
+		},
+		{
+			name:  "false",
+			input: `false`,
+			check: func(v bson.Value) bool {
+				return v.Type == bson.TypeBoolean && v.Boolean() == false
+			},
+		},
+		{
+			name:  "number negative",
+			input: `-42`,
+			check: func(v bson.Value) bool {
+				return v.Type == bson.TypeInt32 && v.Int32() == -42
+			},
+		},
+		{
+			name:  "number large (int64)",
+			input: `9999999999`,
+			check: func(v bson.Value) bool {
+				return v.Type == bson.TypeInt64 && v.Int64() == 9999999999
+			},
+		},
+		{
+			name:    "invalid character",
+			input:   `@invalid`,
+			wantErr: true,
+		},
+		{
+			name:    "unterminated nested document",
+			input:   `{field: {`,
+			wantErr: true,
+		},
+		{
+			name:    "unterminated array",
+			input:   `[1, 2,`,
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			val, _, err := parseValue(tc.input, 0)
+			if tc.wantErr {
+				if err == nil {
+					t.Errorf("parseValue(%q) expected error", tc.input)
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("parseValue(%q) unexpected error: %v", tc.input, err)
+				return
+			}
+			if tc.check != nil && !tc.check(val) {
+				t.Errorf("parseValue(%q) check failed, got type %d", tc.input, val.Type)
+			}
+		})
+	}
+}
+
 // Test parseObjectID
 func TestParseObjectID(t *testing.T) {
 	tests := []struct {

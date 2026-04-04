@@ -6,8 +6,6 @@ import (
 	"github.com/mammothengine/mammoth/pkg/bson"
 )
 
-func int32Val(v int32) bson.Value { return bson.VInt32(v) }
-
 func byIDAsc(a, b *bson.Document) bool {
 	av, _ := a.Get("_id")
 	bv, _ := b.Get("_id")

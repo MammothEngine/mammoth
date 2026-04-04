@@ -18,7 +18,6 @@ type ReplicaSet struct {
 
 	// Applied entries tracking
 	appliedEntries []LogEntry
-	applyDone      chan struct{}
 }
 
 // ReplicaSetConfig configures a replica set node.

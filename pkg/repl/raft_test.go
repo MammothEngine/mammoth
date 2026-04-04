@@ -159,18 +159,6 @@ func waitForLeader(t *testing.T, nodes []*Raft, timeout time.Duration) *Raft {
 	return nil
 }
 
-func drainApplied(ch <-chan LogEntry, timeout time.Duration) []LogEntry {
-	var entries []LogEntry
-	for {
-		select {
-		case e := <-ch:
-			entries = append(entries, e)
-		case <-time.After(timeout):
-			return entries
-		}
-	}
-}
-
 // --- Tests ---
 
 func TestRaftLeaderElection(t *testing.T) {

@@ -35,7 +35,6 @@ type Manifest struct {
 	dir      string
 	file     *os.File
 	version  *Version
-	seqNum   uint64
 }
 
 var crcTable = crc32.MakeTable(crc32.Castagnoli)

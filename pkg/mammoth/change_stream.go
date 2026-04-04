@@ -18,12 +18,11 @@ type ChangeStream struct {
 	mu sync.RWMutex
 
 	// Configuration
-	coll       *Collection
-	db         *Database
-	ns         string         // namespace being watched (db.coll or db)
-	pipeline   []PipelineStage
-	opts       ChangeStreamOptions
-	replicator *repl.OplogReplicator
+	coll     *Collection
+	db       *Database
+	ns       string // namespace being watched (db.coll or db)
+	pipeline []PipelineStage
+	opts     ChangeStreamOptions
 
 	// State
 	ctx        context.Context

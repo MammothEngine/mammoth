@@ -42,7 +42,6 @@ type Handler struct {
 	cat              *mongo.Catalog
 	indexCat         *mongo.IndexCatalog
 	cursor           *mongo.CursorManager
-	reqID            atomic.Uint64
 	processID        bson.ObjectID
 	connID           atomic.Uint64
 	authMgr          *auth.AuthManager

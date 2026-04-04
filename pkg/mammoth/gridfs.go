@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/mammothengine/mammoth/pkg/bson"
-	"github.com/mammothengine/mammoth/pkg/mongo"
 )
 
 const (
@@ -32,7 +31,6 @@ type GridFSBucket struct {
 	db         *Database
 	name       string // bucket name (default: "fs")
 	chunkSize  int32
-	cat        *mongo.Catalog
 
 	// Collections
 	filesColl   *Collection

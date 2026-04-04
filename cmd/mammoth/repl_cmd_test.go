@@ -72,3 +72,35 @@ func TestTokenizeREPL(t *testing.T) {
 		})
 	}
 }
+
+func TestSplitArgs(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected []string
+	}{
+		{"", []string{}},
+		{"{}", []string{"{}"}},
+		{"{}, {}", []string{"{}", "{}"}},
+		{"{a:1}, {b:2}", []string{"{a:1}", "{b:2}"}},
+		{"{nested: {a: 1}}", []string{"{nested: {a: 1}}"}},
+		{"{a:1}, {b:{c:2}}, {d:3}", []string{"{a:1}", "{b:{c:2}}", "{d:3}"}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.input, func(t *testing.T) {
+			got := splitArgs(tc.input)
+			if len(got) != len(tc.expected) {
+				t.Errorf("splitArgs(%q) = %v, want %v", tc.input, got, tc.expected)
+				return
+			}
+			for i := range got {
+				// Trim spaces for comparison
+				gotTrimmed := strings.TrimSpace(got[i])
+				expTrimmed := strings.TrimSpace(tc.expected[i])
+				if gotTrimmed != expTrimmed {
+					t.Errorf("splitArgs(%q)[%d] = %q, want %q", tc.input, i, got[i], tc.expected[i])
+				}
+			}
+		})
+	}
+}

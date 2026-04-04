@@ -30,8 +30,6 @@ type ProductionMetrics struct {
 	// Connection metrics (additional)
 	ActiveConnections *Gauge
 	TotalConnections  *Counter
-
-	mu sync.RWMutex
 }
 
 // NewProductionMetrics creates a new production metrics collector.
