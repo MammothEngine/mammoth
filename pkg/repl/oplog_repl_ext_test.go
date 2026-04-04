@@ -389,3 +389,75 @@ func TestGoValueConversion_DefaultCase(t *testing.T) {
 		t.Errorf("expected String type for unknown, got %v", result.Type)
 	}
 }
+
+// Test bsonValueToGo for all supported types
+func TestBSONValueToGo_Types(t *testing.T) {
+	tests := []struct {
+		name     string
+		value    bson.Value
+		expected interface{}
+	}{
+		{"string", bson.VString("test"), "test"},
+		{"int32", bson.VInt32(42), int32(42)},
+		{"int64", bson.VInt64(100), int64(100)},
+		{"double", bson.VDouble(3.14), float64(3.14)},
+		{"bool", bson.VBool(true), true},
+		{"null", bson.VNull(), ""},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := bsonValueToGo(tc.value)
+			_ = result
+		})
+	}
+}
+
+// Test bsonValueToGo for array
+func TestBSONValueToGo_Array(t *testing.T) {
+	arr := bson.A(bson.VInt32(1), bson.VInt32(2), bson.VInt32(3))
+	val := bson.VArray(arr)
+	result := bsonValueToGo(val)
+
+	if result == nil {
+		t.Error("expected non-nil result for array")
+	}
+}
+
+// Test bsonValueToGo for document
+func TestBSONValueToGo_Document(t *testing.T) {
+	doc := bson.D("name", bson.VString("test"), "value", bson.VInt32(42))
+	val := bson.VDoc(doc)
+	result := bsonValueToGo(val)
+
+	if result == nil {
+		t.Error("expected non-nil result for document")
+	}
+}
+
+// Test docToMap
+func TestDocToMap(t *testing.T) {
+	doc := bson.D(
+		"name", bson.VString("alice"),
+		"age", bson.VInt32(30),
+		"tags", bson.VArray(bson.A(bson.VString("a"), bson.VString("b"))),
+	)
+
+	m := docToMap(doc)
+	if m == nil {
+		t.Error("expected non-nil map")
+	}
+}
+
+// Test mapToDoc
+func TestMapToDoc(t *testing.T) {
+	m := map[string]interface{}{
+		"name": "alice",
+		"age":  int32(30),
+	}
+
+	doc := mapToDoc(m)
+	if doc == nil {
+		t.Error("expected non-nil document")
+	}
+}

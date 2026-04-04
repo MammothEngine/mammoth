@@ -1,6 +1,7 @@
 package wire
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/mammothengine/mammoth/pkg/bson"
@@ -517,5 +518,162 @@ func TestHandle_Find_FallsBackToScan(t *testing.T) {
 	batch := getCursorBatch(t, cursorDoc, "firstBatch")
 	if len(batch) != 1 {
 		t.Errorf("full scan find: expected 1 doc, got %d", len(batch))
+	}
+}
+
+func TestHandle_Distinct(t *testing.T) {
+	h, eng := setupTestHandler(t)
+	defer eng.Close()
+	defer h.Close()
+
+	// Insert docs with different status values
+	statuses := []string{"active", "active", "inactive", "pending", "active", "inactive"}
+	for i, status := range statuses {
+		d := bson.NewDocument()
+		d.Set("_id", bson.VInt32(int32(i)))
+		d.Set("status", bson.VString(status))
+		d.Set("score", bson.VInt32(int32(i*10)))
+		h.Handle(makeInsertMsg("testdb", "items", d))
+	}
+
+	// Test distinct on status field
+	body := bson.NewDocument()
+	body.Set("distinct", bson.VString("items"))
+	body.Set("$db", bson.VString("testdb"))
+	body.Set("key", bson.VString("status"))
+
+	msg := &Message{
+		Header: MsgHeader{OpCode: OpMsg},
+		Msg:    &OPMsg{Sections: []Section{{Kind: 0, Body: body}}},
+	}
+
+	resp := h.Handle(msg)
+	if ok, _ := resp.Get("ok"); ok.Double() != 1.0 {
+		t.Errorf("distinct ok = %v, want 1.0", ok.Double())
+	}
+
+	values, ok := resp.Get("values")
+	if !ok || values.Type != bson.TypeArray {
+		t.Fatal("distinct should return values array")
+	}
+
+	// Should have 3 distinct values: active, inactive, pending
+	arr := values.ArrayValue()
+	if len(arr) != 3 {
+		t.Errorf("expected 3 distinct values, got %d", len(arr))
+	}
+}
+
+func TestHandle_Distinct_WithFilter(t *testing.T) {
+	h, eng := setupTestHandler(t)
+	defer eng.Close()
+	defer h.Close()
+
+	// Insert docs
+	for i := 0; i < 10; i++ {
+		d := bson.NewDocument()
+		d.Set("_id", bson.VInt32(int32(i)))
+		d.Set("category", bson.VString(fmt.Sprintf("cat%d", i%3)))
+		d.Set("active", bson.VBool(i%2 == 0))
+		h.Handle(makeInsertMsg("testdb", "prods", d))
+	}
+
+	// Test distinct with query filter
+	query := bson.NewDocument()
+	query.Set("active", bson.VBool(true))
+
+	body := bson.NewDocument()
+	body.Set("distinct", bson.VString("prods"))
+	body.Set("$db", bson.VString("testdb"))
+	body.Set("key", bson.VString("category"))
+	body.Set("query", bson.VDoc(query))
+
+	msg := &Message{
+		Header: MsgHeader{OpCode: OpMsg},
+		Msg:    &OPMsg{Sections: []Section{{Kind: 0, Body: body}}},
+	}
+
+	resp := h.Handle(msg)
+	if ok, _ := resp.Get("ok"); ok.Double() != 1.0 {
+		t.Errorf("distinct with filter ok = %v, want 1.0", ok.Double())
+	}
+}
+
+func TestHandle_Distinct_NoCollection(t *testing.T) {
+	h, eng := setupTestHandler(t)
+	defer eng.Close()
+	defer h.Close()
+
+	body := bson.NewDocument()
+	body.Set("distinct", bson.VString(""))
+	body.Set("$db", bson.VString("testdb"))
+	body.Set("key", bson.VString("status"))
+
+	msg := &Message{
+		Header: MsgHeader{OpCode: OpMsg},
+		Msg:    &OPMsg{Sections: []Section{{Kind: 0, Body: body}}},
+	}
+
+	resp := h.Handle(msg)
+	if ok, _ := resp.Get("ok"); ok.Double() != 0.0 {
+		t.Errorf("distinct (no collection) ok = %v, want 0.0", ok.Double())
+	}
+}
+
+func TestHandle_Distinct_NoKey(t *testing.T) {
+	h, eng := setupTestHandler(t)
+	defer eng.Close()
+	defer h.Close()
+
+	body := bson.NewDocument()
+	body.Set("distinct", bson.VString("items"))
+	body.Set("$db", bson.VString("testdb"))
+	// Missing key
+
+	msg := &Message{
+		Header: MsgHeader{OpCode: OpMsg},
+		Msg:    &OPMsg{Sections: []Section{{Kind: 0, Body: body}}},
+	}
+
+	resp := h.Handle(msg)
+	if ok, _ := resp.Get("ok"); ok.Double() != 0.0 {
+		t.Errorf("distinct (no key) ok = %v, want 0.0", ok.Double())
+	}
+}
+
+func TestHandle_Distinct_WithArrays(t *testing.T) {
+	h, eng := setupTestHandler(t)
+	defer eng.Close()
+	defer h.Close()
+
+	// Insert docs with array fields
+	d1 := bson.NewDocument()
+	d1.Set("_id", bson.VInt32(1))
+	d1.Set("tags", bson.VArray(bson.A(bson.VString("a"), bson.VString("b"), bson.VString("c"))))
+	h.Handle(makeInsertMsg("testdb", "tagged", d1))
+
+	d2 := bson.NewDocument()
+	d2.Set("_id", bson.VInt32(2))
+	d2.Set("tags", bson.VArray(bson.A(bson.VString("b"), bson.VString("c"), bson.VString("d"))))
+	h.Handle(makeInsertMsg("testdb", "tagged", d2))
+
+	// Test distinct on array field - should flatten arrays
+	body := bson.NewDocument()
+	body.Set("distinct", bson.VString("tagged"))
+	body.Set("$db", bson.VString("testdb"))
+	body.Set("key", bson.VString("tags"))
+
+	msg := &Message{
+		Header: MsgHeader{OpCode: OpMsg},
+		Msg:    &OPMsg{Sections: []Section{{Kind: 0, Body: body}}},
+	}
+
+	resp := h.Handle(msg)
+	values, _ := resp.Get("values")
+	arr := values.ArrayValue()
+
+	// Should have 4 distinct values: a, b, c, d
+	if len(arr) != 4 {
+		t.Errorf("expected 4 distinct values from arrays, got %d", len(arr))
 	}
 }

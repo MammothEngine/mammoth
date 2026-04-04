@@ -1,0 +1,100 @@
+package executor
+
+import (
+	"context"
+	"fmt"
+	"testing"
+
+	"github.com/mammothengine/mammoth/pkg/bson"
+	"github.com/mammothengine/mammoth/pkg/engine"
+	"github.com/mammothengine/mammoth/pkg/mongo"
+)
+
+func setupTestEngine(t *testing.T) (*engine.Engine, func()) {
+	dir := t.TempDir()
+	eng, err := engine.Open(engine.DefaultOptions(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return eng, func() { eng.Close() }
+}
+
+func TestIndexScanNode_Basic(t *testing.T) {
+	eng, cleanup := setupTestEngine(t)
+	defer cleanup()
+
+	// Create an index spec
+	spec := &mongo.IndexSpec{
+		Name: "test_idx",
+		Key:  []mongo.IndexKey{{Field: "name", Descending: false}},
+	}
+
+	// Create index scan node
+	bounds := IndexBounds{
+		LowerBound: []byte("a"),
+		UpperBound: []byte("z"),
+	}
+	node := NewIndexScanNode(eng, "test", "coll", spec, bounds)
+
+	if node == nil {
+		t.Fatal("expected non-nil IndexScanNode")
+	}
+
+	// Test WithFilter
+	filterDoc := bson.NewDocument()
+	filterDoc.Set("active", bson.VBool(true))
+	node.WithFilter(filterDoc)
+
+	// Test Filter() to get filter back
+	fn := node.Filter()
+	if fn == nil {
+		t.Error("expected non-nil filter function")
+	}
+
+	// Test SetFilter
+	node.SetFilter(func(doc *bson.Document) bool {
+		return true
+	})
+
+	// Test WithProjection
+	projDoc := bson.NewDocument()
+	projDoc.Set("name", bson.VInt32(1))
+	node.WithProjection(projDoc)
+}
+
+func TestIndexScanNode_OpenClose(t *testing.T) {
+	eng, cleanup := setupTestEngine(t)
+	defer cleanup()
+
+	spec := &mongo.IndexSpec{
+		Name: "test_idx",
+		Key:  []mongo.IndexKey{{Field: "name", Descending: false}},
+	}
+
+	bounds := IndexBounds{
+		LowerBound: []byte(""),
+		UpperBound: []byte("~"),
+	}
+	node := NewIndexScanNode(eng, "test", "coll", spec, bounds)
+
+	// Open the node
+	ctx := context.Background()
+	err := node.Open(ctx)
+	if err != nil {
+		t.Logf("Open returned: %v (may be expected if index doesn't exist)", err)
+	}
+
+	// Double open should error
+	if node.open {
+		err = node.Open(ctx)
+		if err == nil {
+			t.Error("expected error on double open")
+		}
+	}
+
+	// Close should work
+	err = node.Close()
+	if err != nil {
+		t.Logf("Close returned: %v", err)
+	}
+

@@ -71,11 +71,11 @@ func TestParseModOperator(t *testing.T) {
 // Test toBool, toString, toInt
 func TestTypeConverters(t *testing.T) {
 	tests := []struct {
-		name     string
-		val      bson.Value
-		boolVal  bool
-		strVal   string
-		intVal   int
+		name    string
+		val     bson.Value
+		boolVal bool
+		strVal  string
+		intVal  int
 	}{
 		{"bool true", bson.VBool(true), true, "", -1},
 		{"bool false", bson.VBool(false), false, "", -1},
@@ -247,5 +247,209 @@ func TestCompareBytes(t *testing.T) {
 		if result != tc.expected {
 			t.Errorf("compareBytes(%v, %v) = %d, want %d", tc.a, tc.b, result, tc.expected)
 		}
+	}
+}
+
+// Test $nor operator
+func TestParse_NorOperator(t *testing.T) {
+	doc := bson.NewDocument()
+	arr := bson.A(
+		bson.VDoc(bson.D("name", bson.VString("John"))),
+		bson.VDoc(bson.D("age", bson.VDoc(bson.D("$lt", bson.VInt32(18))))),
+	)
+	doc.Set("$nor", bson.VArray(arr))
+
+	node, err := Parse(doc)
+	if err != nil {
+		t.Fatalf("parse $nor: %v", err)
+	}
+
+	if node.Type() != NodeNor {
+		t.Errorf("expected NodeNor, got %s", node.Type())
+	}
+}
+
+// Test $not operator (top-level)
+func TestParse_NotOperator(t *testing.T) {
+	doc := bson.NewDocument()
+	notDoc := bson.NewDocument()
+	notDoc.Set("name", bson.VString("John"))
+	doc.Set("$not", bson.VDoc(notDoc))
+
+	node, err := Parse(doc)
+	if err != nil {
+		t.Fatalf("parse $not: %v", err)
+	}
+
+	if node.Type() != NodeNot {
+		t.Errorf("expected NodeNot, got %s", node.Type())
+	}
+}
+
+// Test $not operator error case (top-level)
+func TestParse_NotOperator_Error(t *testing.T) {
+	doc := bson.NewDocument()
+	// $not requires a document, not a string
+	doc.Set("$not", bson.VString("invalid"))
+
+	_, err := Parse(doc)
+	if err == nil {
+		t.Error("expected error for $not with non-document value")
+	}
+}
+
+// Test $comment operator (should be ignored)
+func TestParse_CommentOperator(t *testing.T) {
+	doc := bson.NewDocument()
+	doc.Set("$comment", bson.VString("This is a comment"))
+
+	node, err := Parse(doc)
+	if err != nil {
+		t.Fatalf("parse $comment: %v", err)
+	}
+
+	// $comment should return an AND node (effectively a no-op)
+	if node.Type() != NodeAnd {
+		t.Errorf("expected NodeAnd for $comment, got %s", node.Type())
+	}
+}
+
+// Test $where operator (not supported)
+func TestParse_WhereOperator(t *testing.T) {
+	doc := bson.NewDocument()
+	doc.Set("$where", bson.VString("this.x > 0"))
+
+	_, err := Parse(doc)
+	if err == nil {
+		t.Error("expected error for $where (not supported)")
+	}
+}
+
+// Test $mod operator error cases
+func TestParse_ModOperator_Errors(t *testing.T) {
+	// Test with non-array value
+	doc1 := bson.NewDocument()
+	opDoc1 := bson.NewDocument()
+	opDoc1.Set("$mod", bson.VString("not an array"))
+	doc1.Set("field", bson.VDoc(opDoc1))
+
+	_, err := Parse(doc1)
+	if err == nil {
+		t.Error("expected error for $mod with non-array")
+	}
+
+	// Test with array of wrong length
+	doc2 := bson.NewDocument()
+	opDoc2 := bson.NewDocument()
+	opDoc2.Set("$mod", bson.VArray(bson.A(bson.VInt32(10)))) // Only 1 element
+	doc2.Set("field", bson.VDoc(opDoc2))
+
+	_, err = Parse(doc2)
+	if err == nil {
+		t.Error("expected error for $mod with wrong array length")
+	}
+}
+
+// Test parseLogicalArray error cases
+func TestParseLogicalArray_Errors(t *testing.T) {
+	// Test $and with empty array
+	doc1 := bson.NewDocument()
+	doc1.Set("$and", bson.VArray(bson.A()))
+	_, err := Parse(doc1)
+	if err == nil {
+		t.Error("expected error for $and with empty array")
+	}
+
+	// Test $or with non-array value
+	doc2 := bson.NewDocument()
+	doc2.Set("$or", bson.VString("not an array"))
+	_, err = Parse(doc2)
+	if err == nil {
+		t.Error("expected error for $or with non-array")
+	}
+
+	// Test $nor with array containing non-document
+	doc3 := bson.NewDocument()
+	doc3.Set("$nor", bson.VArray(bson.A(bson.VString("not a doc"))))
+	_, err = Parse(doc3)
+	if err == nil {
+		t.Error("expected error for $nor with non-document element")
+	}
+}
+
+// Test parseOperator error cases
+func TestParseOperator_Errors(t *testing.T) {
+	// Test $type with empty string
+	doc1 := bson.NewDocument()
+	opDoc1 := bson.NewDocument()
+	opDoc1.Set("$type", bson.VString(""))
+	doc1.Set("field", bson.VDoc(opDoc1))
+	_, err := Parse(doc1)
+	if err == nil {
+		t.Error("expected error for $type with empty string")
+	}
+
+	// Test unknown operator
+	doc2 := bson.NewDocument()
+	opDoc2 := bson.NewDocument()
+	opDoc2.Set("$unknownOperator", bson.VInt32(1))
+	doc2.Set("field", bson.VDoc(opDoc2))
+	_, err = Parse(doc2)
+	if err == nil {
+		t.Error("expected error for unknown operator")
+	}
+
+	// Test $size with negative value
+	doc3 := bson.NewDocument()
+	opDoc3 := bson.NewDocument()
+	opDoc3.Set("$size", bson.VInt32(-1))
+	doc3.Set("field", bson.VDoc(opDoc3))
+	_, err = Parse(doc3)
+	if err == nil {
+		t.Error("expected error for $size with negative value")
+	}
+
+	// Test $options without $regex
+	doc4 := bson.NewDocument()
+	opDoc4 := bson.NewDocument()
+	opDoc4.Set("$options", bson.VString("i"))
+	doc4.Set("field", bson.VDoc(opDoc4))
+	_, err = Parse(doc4)
+	if err == nil {
+		t.Error("expected error for $options without $regex")
+	}
+
+	// Test $expr (not implemented)
+	doc5 := bson.NewDocument()
+	opDoc5 := bson.NewDocument()
+	opDoc5.Set("$expr", bson.VDoc(bson.D("$eq", bson.VArray(bson.A(bson.VString("$field"), bson.VInt32(1))))))
+	doc5.Set("field", bson.VDoc(opDoc5))
+	_, err = Parse(doc5)
+	if err == nil {
+		t.Error("expected error for $expr (not implemented)")
+	}
+}
+
+// Test parseRegexOperator error case
+func TestParseRegexOperator_Error(t *testing.T) {
+	// Test $regex with non-string/non-regex value
+	doc := bson.NewDocument()
+	opDoc := bson.NewDocument()
+	opDoc.Set("$regex", bson.VInt32(123))
+	doc.Set("field", bson.VDoc(opDoc))
+	_, err := Parse(doc)
+	if err == nil {
+		t.Error("expected error for $regex with non-string value")
+	}
+}
+
+// Test parseTextSearch error case
+func TestParseTextSearch_Error(t *testing.T) {
+	// Test $text with non-document value
+	doc := bson.NewDocument()
+	doc.Set("$text", bson.VString("not a document"))
+	_, err := Parse(doc)
+	if err == nil {
+		t.Error("expected error for $text with non-document value")
 	}
 }

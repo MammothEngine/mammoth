@@ -195,3 +195,51 @@ func TestEncodePayload(t *testing.T) {
 		t.Errorf("expected term 1, got %d", decoded.Term)
 	}
 }
+
+// Test DecodeRPC with various invalid inputs
+func TestDecodeRPC_InvalidData(t *testing.T) {
+	// Too short (less than 13 bytes)
+	_, err := DecodeRPC([]byte{1, 2, 3, 4, 5})
+	if err == nil {
+		t.Error("expected error for data too short (< 13 bytes)")
+	}
+
+	// Exactly 13 bytes but payload length claims more
+	data := make([]byte, 13)
+	data[0] = 1 // Type
+	// From: 8 bytes (1-9)
+	data[9] = 0
+	data[10] = 0
+	data[11] = 0
+	data[12] = 100 // Payload length = 100 (but only 0 bytes available)
+	_, err = DecodeRPC(data)
+	if err == nil {
+		t.Error("expected error for payload length mismatch")
+	}
+}
+
+// Test DecodeRPC with valid data
+func TestDecodeRPC_Valid(t *testing.T) {
+	payload := []byte(`{"term": 1, "success": true}`)
+	req := &RPCRequest{
+		Type:    MsgAppendEntriesResp,
+		From:    42,
+		Payload: payload,
+	}
+
+	encoded := EncodeRPC(req)
+	decoded, err := DecodeRPC(encoded)
+	if err != nil {
+		t.Fatalf("DecodeRPC: %v", err)
+	}
+
+	if decoded.Type != MsgAppendEntriesResp {
+		t.Errorf("expected type %d, got %d", MsgAppendEntriesResp, decoded.Type)
+	}
+	if decoded.From != 42 {
+		t.Errorf("expected from 42, got %d", decoded.From)
+	}
+	if !bytes.Equal(decoded.Payload, payload) {
+		t.Errorf("payload mismatch: got %s, want %s", decoded.Payload, payload)
+	}
+}

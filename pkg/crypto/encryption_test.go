@@ -2,6 +2,7 @@ package crypto
 
 import (
 	"bytes"
+	"encoding/base64"
 	"testing"
 )
 
@@ -150,6 +151,17 @@ func TestSecureCompare(t *testing.T) {
 	// Empty slices
 	if !SecureCompare([]byte{}, []byte{}) {
 		t.Error("SecureCompare should handle empty slices")
+	}
+}
+
+func TestNewProvider_InvalidKey(t *testing.T) {
+	// Test with invalid key through NewProvider
+	_, err := NewProvider(EncryptionConfig{
+		Key:              make([]byte, 16), // Wrong size
+		EnableEncryption: true,
+	})
+	if err == nil {
+		t.Error("Expected error for invalid key size")
 	}
 }
 
@@ -318,6 +330,67 @@ func TestDecryptWithKey_WrongKey(t *testing.T) {
 	_, err := DecryptWithKey(ciphertext, key2)
 	if err == nil {
 		t.Error("Expected error when decrypting with wrong key")
+	}
+}
+
+func TestDecryptString_InvalidBase64(t *testing.T) {
+	key, _ := GenerateKey()
+	provider, _ := NewProvider(EncryptionConfig{
+		Key:              key,
+		EnableEncryption: true,
+	})
+
+	// Test with invalid base64 string
+	_, err := provider.DecryptString("not-valid-base64!!!")
+	if err == nil {
+		t.Error("Expected error for invalid base64 input")
+	}
+}
+
+func TestDecrypt_CiphertextTooShort(t *testing.T) {
+	key, _ := GenerateKey()
+	provider, _ := NewProvider(EncryptionConfig{
+		Key:              key,
+		EnableEncryption: true,
+	})
+
+	// Test with data too short to contain nonce (less than 12 bytes for GCM)
+	_, err := provider.Decrypt([]byte("short"))
+	if err != ErrDecryptionFailed {
+		t.Errorf("Expected ErrDecryptionFailed for short ciphertext, got %v", err)
+	}
+}
+
+func TestDecrypt_CorruptCiphertext(t *testing.T) {
+	key, _ := GenerateKey()
+	provider, _ := NewProvider(EncryptionConfig{
+		Key:              key,
+		EnableEncryption: true,
+	})
+
+	// Create a valid nonce (12 bytes for GCM) followed by garbage
+	corruptData := make([]byte, 32)
+	_, err := provider.Decrypt(corruptData)
+	if err == nil {
+		t.Error("Expected error for corrupted ciphertext")
+	}
+}
+
+func TestEncryptString_WithError(t *testing.T) {
+	// When encryption is disabled, EncryptString should work fine
+	provider, _ := NewProvider(EncryptionConfig{
+		EnableEncryption: false,
+	})
+
+	result, err := provider.EncryptString("test")
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	// When disabled, the string should be base64 encoded plaintext
+	expected := base64.StdEncoding.EncodeToString([]byte("test"))
+	if result != expected {
+		t.Errorf("Expected %q, got %q", expected, result)
 	}
 }
 

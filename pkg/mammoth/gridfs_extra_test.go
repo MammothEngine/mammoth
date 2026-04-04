@@ -339,3 +339,100 @@ func TestGridFSBucket_FindWithFilter(t *testing.T) {
 		t.Errorf("Find all returned %d files, want at least 3", len(allFiles))
 	}
 }
+
+// TestGridFSBucket_Drop_ErrorPaths tests Drop with error paths
+func TestGridFSBucket_Drop_ErrorPaths(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+
+	bucket, err := db.OpenBucket(nil)
+	if err != nil {
+		t.Fatalf("OpenBucket: %v", err)
+	}
+
+	// Drop should succeed even with no files
+	err = bucket.Drop()
+	if err != nil {
+		t.Errorf("Drop on empty bucket: %v", err)
+	}
+
+	// Second drop should also succeed
+	err = bucket.Drop()
+	if err != nil {
+		t.Logf("Drop on already dropped bucket (expected): %v", err)
+	}
+}
+
+// TestGridFSBucket_Delete_ErrorPaths tests Delete error handling
+func TestGridFSBucket_Delete_ErrorPaths(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+
+	bucket, err := db.OpenBucket(nil)
+	if err != nil {
+		t.Fatalf("OpenBucket: %v", err)
+	}
+	defer bucket.Drop()
+
+	// Delete non-existent file - should not error
+	err = bucket.Delete("non-existent-id")
+	if err != nil {
+		t.Logf("Delete non-existent file returned error (may be expected): %v", err)
+	}
+}
+
+// TestGridFSBucket_DeleteByName_ErrorPaths tests DeleteByName error handling
+func TestGridFSBucket_DeleteByName_ErrorPaths(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+
+	bucket, err := db.OpenBucket(nil)
+	if err != nil {
+		t.Fatalf("OpenBucket: %v", err)
+	}
+	defer bucket.Drop()
+
+	// DeleteByName with empty name
+	err = bucket.DeleteByName("")
+	if err != nil {
+		t.Logf("DeleteByName empty: %v", err)
+	}
+
+	// DeleteByName non-existent file
+	err = bucket.DeleteByName("non-existent-file.txt")
+	if err != nil {
+		t.Logf("DeleteByName non-existent: %v", err)
+	}
+}
+
+// TestGridFSUploadStream_Close_ErrorPaths tests Close with various states
+func TestGridFSUploadStream_Close_ErrorPaths(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+
+	bucket, err := db.OpenBucket(nil)
+	if err != nil {
+		t.Fatalf("OpenBucket: %v", err)
+	}
+	defer bucket.Drop()
+
+	// Create and close stream normally
+	stream, err := bucket.OpenUploadStream("test_close.txt")
+	if err != nil {
+		t.Fatalf("OpenUploadStream: %v", err)
+	}
+
+	stream.Write([]byte("test data"))
+
+	// First close should succeed
+	err = stream.Close()
+	if err != nil {
+		t.Errorf("First Close: %v", err)
+	}
+
+	// Second close should be safe
+	err = stream.Close()
+	if err != nil {
+		t.Logf("Second Close: %v", err)
+	}
+}

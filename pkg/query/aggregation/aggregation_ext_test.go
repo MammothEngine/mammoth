@@ -349,3 +349,234 @@ func TestUnwindStage_InvalidInput(t *testing.T) {
 		t.Error("expected error for array unwind value")
 	}
 }
+
+// Test toFloat64 with bson.Value types
+func TestToFloat64_BSONValues(t *testing.T) {
+	tests := []struct {
+		input    interface{}
+		expected float64
+		ok       bool
+	}{
+		{bson.VInt32(42), 42, true},
+		{bson.VInt64(100), 100, true},
+		{bson.VDouble(3.14), 3.14, true},
+		{bson.VString("not a number"), 0, false},
+		{bson.VNull(), 0, false},
+		{bson.VBool(true), 0, false},
+	}
+
+	for _, tt := range tests {
+		result := toFloat64(tt.input)
+		if tt.ok && result != tt.expected {
+			t.Errorf("toFloat64(%v) = %f, want %f", tt.input, result, tt.expected)
+		}
+	}
+}
+
+// Test toBSONValue with more types
+func TestToBSONValue_MoreTypes(t *testing.T) {
+	tests := []struct {
+		input    interface{}
+		expected bson.BSONType
+	}{
+		{nil, bson.TypeNull},
+		{true, bson.TypeBoolean},
+		{int(42), bson.TypeInt32},
+		{int32(42), bson.TypeInt32},
+		{int64(100), bson.TypeInt64},
+		{float64(3.14), bson.TypeDouble},
+		{"hello", bson.TypeString},
+		{bson.VInt32(5), bson.TypeInt32},
+		{[]byte("test"), bson.TypeNull}, // unknown type returns null
+	}
+
+	for _, tt := range tests {
+		result := toBSONValue(tt.input)
+		if result.Type != tt.expected {
+			t.Errorf("toBSONValue(%v).Type = %v, want %v", tt.input, result.Type, tt.expected)
+		}
+	}
+}
+
+// Test toInterface default case
+func TestToInterface_DefaultCase(t *testing.T) {
+	// Test with ObjectID which falls through to default case
+	oid := bson.NewObjectID()
+	v := bson.VObjectID(oid)
+	result := toInterface(v)
+	if result == nil {
+		t.Error("toInterface for ObjectID should not return nil")
+	}
+}
+
+// Test evaluateIDExpression with nil and $null
+func TestEvaluateIDExpression_NilAndNull(t *testing.T) {
+	doc := bson.NewDocument()
+	doc.Set("field", bson.VString("value"))
+
+	// nil input
+	result := evaluateIDExpression(nil, doc)
+	if result.Type != bson.TypeNull {
+		t.Errorf("evaluateIDExpression(nil) = %v, want null", result.Type)
+	}
+
+	// $null string
+	result = evaluateIDExpression("$null", doc)
+	if result.Type != bson.TypeNull {
+		t.Errorf("evaluateIDExpression('$null') = %v, want null", result.Type)
+	}
+}
+
+// Test evaluateExpression with various types
+func TestEvaluateExpression_Types(t *testing.T) {
+	doc := bson.NewDocument()
+	doc.Set("name", bson.VString("alice"))
+	doc.Set("age", bson.VInt32(30))
+
+	// String field reference
+	result := evaluateExpression("$name", doc)
+	if result.String() != "alice" {
+		t.Errorf("evaluateExpression('$name') = %v, want alice", result.String())
+	}
+
+	// Missing field
+	result = evaluateExpression("$missing", doc)
+	if result.Type != bson.TypeNull {
+		t.Errorf("evaluateExpression('$missing') = %v, want null", result.Type)
+	}
+
+	// Plain string
+	result = evaluateExpression("hello", doc)
+	if result.String() != "hello" {
+		t.Errorf("evaluateExpression('hello') = %v, want hello", result.String())
+	}
+
+	// Int
+	result = evaluateExpression(42, doc)
+	if result.Int32() != 42 {
+		t.Errorf("evaluateExpression(42) = %v, want 42", result.Int32())
+	}
+
+	// Int64
+	result = evaluateExpression(int64(100), doc)
+	if result.Int64() != 100 {
+		t.Errorf("evaluateExpression(int64(100)) = %v, want 100", result.Int64())
+	}
+
+	// Float64
+	result = evaluateExpression(3.14, doc)
+	if result.Double() != 3.14 {
+		t.Errorf("evaluateExpression(3.14) = %v, want 3.14", result.Double())
+	}
+
+	// Bool
+	result = evaluateExpression(true, doc)
+	if !result.Boolean() {
+		t.Error("evaluateExpression(true) should return true")
+	}
+}
+
+// Test evaluateExpression with operators
+func TestEvaluateExpression_Operators(t *testing.T) {
+	doc := bson.NewDocument()
+	doc.Set("a", bson.VInt32(10))
+	doc.Set("b", bson.VInt32(5))
+
+	// $add
+	result := evaluateExpression(map[string]interface{}{"$add": []interface{}{"$a", "$b", 5}}, doc)
+	if result.Double() != 20 {
+		t.Errorf("$add result = %v, want 20", result.Double())
+	}
+
+	// $multiply
+	result = evaluateExpression(map[string]interface{}{"$multiply": []interface{}{"$a", "$b"}}, doc)
+	if result.Double() != 50 {
+		t.Errorf("$multiply result = %v, want 50", result.Double())
+	}
+
+	// $subtract
+	result = evaluateExpression(map[string]interface{}{"$subtract": []interface{}{"$a", "$b"}}, doc)
+	if result.Double() != 5 {
+		t.Errorf("$subtract result = %v, want 5", result.Double())
+	}
+
+	// $divide
+	result = evaluateExpression(map[string]interface{}{"$divide": []interface{}{"$a", "$b"}}, doc)
+	if result.Double() != 2 {
+		t.Errorf("$divide result = %v, want 2", result.Double())
+	}
+
+	// $divide by zero
+	result = evaluateExpression(map[string]interface{}{"$divide": []interface{}{"$a", 0}}, doc)
+	if result.Type != bson.TypeNull {
+		t.Errorf("$divide by zero = %v, want null", result.Type)
+	}
+
+	// Unknown operator
+	result = evaluateExpression(map[string]interface{}{"$unknown": []interface{}{"$a"}}, doc)
+	if result.Type != bson.TypeNull {
+		t.Errorf("$unknown operator = %v, want null", result.Type)
+	}
+}
+
+// Test evaluateAdd with non-array
+func TestEvaluateAdd_NonArray(t *testing.T) {
+	doc := bson.NewDocument()
+	result := evaluateAdd("not an array", doc)
+	if result.Type != bson.TypeNull {
+		t.Errorf("evaluateAdd(non-array) = %v, want null", result.Type)
+	}
+}
+
+// Test evaluateMultiply with insufficient operands
+func TestEvaluateMultiply_InsufficientOperands(t *testing.T) {
+	doc := bson.NewDocument()
+	doc.Set("a", bson.VInt32(10))
+
+	// Less than 2 operands
+	result := evaluateMultiply([]interface{}{"$a"}, doc)
+	if result.Type != bson.TypeNull {
+		t.Errorf("evaluateMultiply(1 operand) = %v, want null", result.Type)
+	}
+
+	// Non-array
+	result = evaluateMultiply("not an array", doc)
+	if result.Type != bson.TypeNull {
+		t.Errorf("evaluateMultiply(non-array) = %v, want null", result.Type)
+	}
+}
+
+// Test evaluateSubtract with wrong number of operands
+func TestEvaluateSubtract_WrongOperands(t *testing.T) {
+	doc := bson.NewDocument()
+
+	// Non-array
+	result := evaluateSubtract("not an array", doc)
+	if result.Type != bson.TypeNull {
+		t.Errorf("evaluateSubtract(non-array) = %v, want null", result.Type)
+	}
+
+	// Wrong number of operands
+	result = evaluateSubtract([]interface{}{1, 2, 3}, doc)
+	if result.Type != bson.TypeNull {
+		t.Errorf("evaluateSubtract(3 operands) = %v, want null", result.Type)
+	}
+}
+
+// Test evaluateDivide with wrong number of operands
+func TestEvaluateDivide_WrongOperands(t *testing.T) {
+	doc := bson.NewDocument()
+
+	// Non-array
+	result := evaluateDivide("not an array", doc)
+	if result.Type != bson.TypeNull {
+		t.Errorf("evaluateDivide(non-array) = %v, want null", result.Type)
+	}
+
+	// Wrong number of operands
+	result = evaluateDivide([]interface{}{1, 2, 3}, doc)
+	if result.Type != bson.TypeNull {
+		t.Errorf("evaluateDivide(3 operands) = %v, want null", result.Type)
+	}
+}
+

@@ -302,3 +302,22 @@ func TestTCPTransport_handleConn_WithHandler(t *testing.T) {
 		t.Error("handleConn did not complete")
 	}
 }
+
+// Test Listen with invalid address
+func TestTCPTransport_Listen_InvalidAddress(t *testing.T) {
+	// Create transport with invalid address format
+	transport := NewTCPTransport("invalid.address.format:abc")
+
+	err := transport.Listen()
+	if err == nil {
+		t.Error("expected error for invalid address")
+	}
+}
+
+// Test Close on transport that hasn't been listened
+func TestTCPTransport_Close_NotListened(t *testing.T) {
+	transport := NewTCPTransport("127.0.0.1:0")
+
+	// Should not panic
+	transport.Close()
+}

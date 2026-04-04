@@ -5,9 +5,43 @@ import (
 	"time"
 
 	"github.com/mammothengine/mammoth/pkg/audit"
+	"github.com/mammothengine/mammoth/pkg/circuitbreaker"
 	"github.com/mammothengine/mammoth/pkg/engine"
 	"github.com/mammothengine/mammoth/pkg/mongo"
+	"github.com/mammothengine/mammoth/pkg/ratelimit"
 )
+
+func TestHandler_WithRateLimiter(t *testing.T) {
+	h, eng := setupTestHandler(t)
+	defer eng.Close()
+	defer h.Close()
+
+	rl := ratelimit.NewManager(ratelimit.Config{})
+	result := h.WithRateLimiter(rl)
+
+	if result != h {
+		t.Error("WithRateLimiter should return the handler for chaining")
+	}
+	if h.rateLimiter != rl {
+		t.Error("rateLimiter was not set correctly")
+	}
+}
+
+func TestHandler_WithCircuitBreaker(t *testing.T) {
+	h, eng := setupTestHandler(t)
+	defer eng.Close()
+	defer h.Close()
+
+	cb := circuitbreaker.NewManager(circuitbreaker.Config{})
+	result := h.WithCircuitBreaker(cb)
+
+	if result != h {
+		t.Error("WithCircuitBreaker should return the handler for chaining")
+	}
+	if h.circuitBreaker != cb {
+		t.Error("circuitBreaker was not set correctly")
+	}
+}
 
 func TestHandler_WithMetrics(t *testing.T) {
 	h, eng := setupTestHandler(t)

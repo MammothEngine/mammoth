@@ -6,7 +6,7 @@ A high-performance, MongoDB-compatible document database engine built in Go.
 [![Test Coverage](https://img.shields.io/badge/coverage-85%25-brightgreen)](#)
 [![Go Version](https://img.shields.io/badge/go-1.23+-blue)](#)
 [![License](https://img.shields.io/badge/license-MIT-blue)](#)
-[![Version](https://img.shields.io/badge/version-0.0.1--alpha-orange)](#)
+[![Version](https://img.shields.io/badge/version-0.1.0--beta-orange)](#)
 
 ## Overview
 
@@ -356,6 +356,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ---
 
-**Status:** 0.1.0 Beta - Production Ready
+**Status:** 0.1.0-beta - Production Ready
 
 Last Updated: 2026-04-03

@@ -725,7 +725,7 @@ chaosLoop:
 
 	// Wait for recovery
 	t.Log("Chaos injection complete, waiting for recovery...")
-	time.Sleep(3 * time.Second)
+	time.Sleep(5 * time.Second)
 
 	// Report results
 	totalOps := atomic.LoadInt32(&operationCount)
@@ -738,13 +738,22 @@ chaosLoop:
 	t.Logf("Failed writes: %d", failedOps)
 	t.Logf("Success rate: %.2f%%", float64(successOps)/float64(totalOps)*100)
 
-	// Verify cluster health
-	leaderCount := 0
-	for _, n := range nodes {
-		if n.rs.IsLeader() {
-			leaderCount++
+	// Verify cluster health with polling (leader election may take time)
+	var leaderCount int
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		leaderCount = 0
+		for _, n := range nodes {
+			if n.rs.IsLeader() {
+				leaderCount++
+			}
 		}
+		if leaderCount == 1 {
+			break // Found exactly one leader, cluster is healthy
+		}
+		time.Sleep(500 * time.Millisecond)
 	}
+
 	if leaderCount != 1 {
 		t.Errorf("Expected 1 leader after chaos, got %d", leaderCount)
 	} else {

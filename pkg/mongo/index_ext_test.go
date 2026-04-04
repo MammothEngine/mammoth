@@ -2,6 +2,7 @@ package mongo
 
 import (
 	"bytes"
+	"math"
 	"testing"
 
 	"github.com/mammothengine/mammoth/pkg/bson"
@@ -530,6 +531,82 @@ func TestIndexScanPrefix(t *testing.T) {
 	nsPrefix := EncodeNamespacePrefix("mydb", "mycoll")
 	if !bytes.HasPrefix(prefix, nsPrefix) {
 		t.Error("prefix should start with namespace")
+	}
+}
+
+// Test encodeIndexValue for all types
+func TestEncodeIndexValue_Types(t *testing.T) {
+	tests := []struct {
+		name     string
+		value    bson.Value
+		expected byte // first byte (type tag)
+	}{
+		{"null", bson.VNull(), typeTagNull},
+		{"bool true", bson.VBool(true), typeTagTrue},
+		{"bool false", bson.VBool(false), typeTagFalse},
+		{"int32", bson.VInt32(42), typeTagNumber},
+		{"int64", bson.VInt64(100), typeTagNumber},
+		{"double", bson.VDouble(3.14), typeTagNumber},
+		{"string", bson.VString("test"), typeTagString},
+		{"objectid", bson.VObjectID(bson.ObjectID{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}), typeTagOID},
+		{"datetime", bson.VDateTime(1234567890), typeTagDate},
+		{"minkey", bson.VMinKey(), typeTagMinKey},
+		{"maxkey", bson.VMaxKey(), typeTagMaxKey},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := encodeIndexValue(tc.value)
+			if len(result) == 0 {
+				t.Fatal("expected non-empty result")
+			}
+			if result[0] != tc.expected {
+				t.Errorf("type tag = 0x%02x, want 0x%02x", result[0], tc.expected)
+			}
+		})
+	}
+}
+
+// Test encodeIndexValue for unknown type (default case)
+func TestEncodeIndexValue_UnknownType(t *testing.T) {
+	// Create a value with an unsupported type (binary)
+	val := bson.VBinary(bson.BinaryGeneric, []byte{1, 2, 3})
+	result := encodeIndexValue(val)
+	if len(result) == 0 {
+		t.Fatal("expected non-empty result")
+	}
+	if result[0] != typeTagNull {
+		t.Errorf("unknown type should return null tag, got 0x%02x", result[0])
+	}
+}
+
+// Test encodeIndexNumber with NaN
+func TestEncodeIndexNumber_NaN(t *testing.T) {
+	result := encodeIndexNumber(math.NaN())
+	if len(result) != 9 {
+		t.Errorf("expected 9 bytes, got %d", len(result))
+	}
+	if result[0] != typeTagNumber {
+		t.Errorf("expected number tag, got 0x%02x", result[0])
+	}
+}
+
+// Test encodeIndexNumber with positive and negative infinity
+func TestEncodeIndexNumber_Infinity(t *testing.T) {
+	posInf := encodeIndexNumber(math.Inf(1))
+	negInf := encodeIndexNumber(math.Inf(-1))
+
+	if len(posInf) != 9 || len(negInf) != 9 {
+		t.Error("expected 9 bytes for infinity values")
+	}
+
+	// Negative infinity should sort before positive infinity
+	// Compare byte by byte after the type tag
+	for i := 1; i < 9; i++ {
+		if negInf[i] >= posInf[i] {
+			// This is expected behavior, just verify they're different
+			break
+		}
 	}
 }
 

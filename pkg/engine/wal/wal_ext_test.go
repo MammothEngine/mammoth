@@ -475,3 +475,128 @@ func TestSegment_Size(t *testing.T) {
 		t.Error("Size should increase after write")
 	}
 }
+
+// TestListSegments_InvalidDir tests ListSegments with invalid directory
+func TestListSegments_InvalidDir(t *testing.T) {
+	// Try to list segments in non-existent directory
+	_, err := ListSegments("/nonexistent/directory/that/does/not/exist")
+	if err == nil {
+		t.Error("expected error for non-existent directory")
+	}
+}
+
+// TestReplay_ListSegmentsError tests Replay when ListSegments fails
+func TestReplay_ListSegmentsError(t *testing.T) {
+	// Use a file path instead of directory to cause error
+	f, err := os.CreateTemp("", "wal_test_replay")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	defer os.Remove(f.Name())
+
+	_, err = Replay(f.Name())
+	if err == nil {
+		t.Error("expected error when ListSegments fails")
+	}
+}
+
+// TestReplay_ReadRecordsError tests Replay skipping corrupt segments
+func TestReplay_ReadRecordsError(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create a valid segment first
+	seg, err := CreateSegment(dir, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := &Record{Type: RecordFull, SeqNum: 1, Payload: []byte("valid")}
+	seg.WriteRecord(rec, true)
+	seg.Close()
+
+	// Create an invalid/corrupt segment file
+	badPath := filepath.Join(dir, "wal_000002.log")
+	if err := os.WriteFile(badPath, []byte("not valid WAL data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Replay should skip the corrupt segment and return valid records
+	records, err := Replay(dir)
+	if err != nil {
+		t.Fatalf("Replay: %v", err)
+	}
+	if len(records) != 1 {
+		t.Errorf("expected 1 record, got %d", len(records))
+	}
+}
+
+// TestOpen_CreateSegmentError tests Open when CreateSegment fails
+func TestOpen_CreateSegmentError(t *testing.T) {
+	// Create a file and try to use it as a directory (should fail)
+	f, err := os.CreateTemp("", "wal_test_dir")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	defer os.Remove(f.Name())
+
+	// Try to create WAL using a file path as directory (should fail)
+	opts := DefaultOptions(filepath.Join(f.Name(), "subdir"))
+	_, err = Open(opts)
+	if err == nil {
+		t.Error("expected error when directory cannot be created")
+	}
+}
+
+// TestOpen_RecoverWithCorruptSegment tests Open recovering with corrupt segments
+func TestOpen_RecoverWithCorruptSegment(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create first a valid WAL with some data
+	opts := DefaultOptions(dir)
+	w1, err := Open(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w1.WALWrite([]byte("data1"))
+	w1.Close()
+
+	// Create a corrupt segment file that will cause ReadRecords to fail
+	badPath := filepath.Join(dir, "wal_000999.log")
+	os.WriteFile(badPath, []byte{0xFF, 0xFF, 0xFF, 0xFF}, 0644)
+
+	// Open should handle the corrupt segment gracefully
+	w2, err := Open(opts)
+	if err != nil {
+		t.Fatalf("Open with corrupt segment: %v", err)
+	}
+
+	// Should still be able to write
+	_, err = w2.WALWrite([]byte("data2"))
+	if err != nil {
+		t.Errorf("WALWrite after corrupt recovery: %v", err)
+	}
+	w2.Close()
+}
+
+// TestOpen_RecoverWithInvalidSegmentName tests Open with invalid segment names
+func TestOpen_RecoverWithInvalidSegmentName(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create a valid segment
+	seg, _ := CreateSegment(dir, 1)
+	rec := &Record{Type: RecordFull, SeqNum: 1, Payload: []byte("test")}
+	seg.WriteRecord(rec, true)
+	seg.Close()
+
+	// Create a file with invalid name format that ParseSegmentIndex will fail on
+	badPath := filepath.Join(dir, "invalid_name.log")
+	os.WriteFile(badPath, []byte("data"), 0644)
+
+	// Open should skip the invalid named file
+	w, err := Open(DefaultOptions(dir))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	w.Close()
+}

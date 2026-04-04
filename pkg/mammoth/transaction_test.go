@@ -191,3 +191,71 @@ func TestWithTransactionUserError(t *testing.T) {
 		t.Errorf("expected %v, got %v", customErr, err)
 	}
 }
+
+// TestWithTransactionCustomOptions tests transaction with custom options from context
+func TestWithTransactionCustomOptions(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+
+	customOpts := TransactionOptions{
+		MaxRetries: 1,
+		RetryDelay: 5 * time.Millisecond,
+		Timeout:    5 * time.Second,
+		ReadOnly:   false,
+	}
+
+	ctx := WithTransactionOptions(context.Background(), customOpts)
+
+	err := db.WithTransaction(ctx, func(tx *Transaction) error {
+		return nil
+	})
+
+	if err != nil {
+		t.Errorf("WithTransaction with custom options: %v", err)
+	}
+}
+
+// TestWithTransactionReadOnlyOption tests read-only transaction option
+func TestWithTransactionReadOnlyOption(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+
+	customOpts := TransactionOptions{
+		ReadOnly: true,
+	}
+
+	ctx := WithTransactionOptions(context.Background(), customOpts)
+
+	err := db.WithTransaction(ctx, func(tx *Transaction) error {
+		// Read-only transaction should still work for reads
+		return nil
+	})
+
+	if err != nil {
+		t.Errorf("WithTransaction read-only: %v", err)
+	}
+}
+
+// TestTransactionOperationsAfterFinish tests operations after commit/rollback
+func TestTransactionOperationsAfterFinish(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+
+	// Test Put after commit
+	tx1, _ := db.StartTransaction()
+	tx1.Commit()
+
+	err := tx1.Put([]byte("key"), []byte("value"))
+	if err == nil {
+		t.Error("expected error for Put after commit")
+	}
+
+	// Test Delete after rollback
+	tx2, _ := db.StartTransaction()
+	tx2.Rollback()
+
+	err = tx2.Delete([]byte("key"))
+	if err == nil {
+		t.Error("expected error for Delete after rollback")
+	}
+}

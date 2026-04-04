@@ -342,3 +342,184 @@ type mockBatch struct {
 func (b *mockBatch) Put(key, value []byte) {}
 func (b *mockBatch) Delete(key []byte) {}
 func (b *mockBatch) Commit() error { return nil }
+
+// Test AddMember with duplicate member ID
+func TestReplicaSetManager_AddMember_Duplicate(t *testing.T) {
+	mt := NewMemTransport()
+	cfg := &ClusterConfig{
+		Nodes: []NodeConfig{
+			{ID: 1, Address: "localhost:27017", Voter: true},
+		},
+	}
+
+	eng := &mockEngine{data: make(map[string][]byte)}
+	rs := NewReplicaSet(ReplicaSetConfig{
+		ID:        1,
+		Config:    cfg,
+		Engine:    eng,
+		Transport: mt,
+	})
+
+	rsm := NewReplicaSetManager(rs)
+
+	// Add first member
+	member := &MemberInfo{
+		ID:   2,
+		Host: "localhost:27018",
+	}
+	err := rsm.AddMember(member)
+	if err != nil {
+		t.Logf("First AddMember: %v", err)
+	}
+
+	// Try to add duplicate
+	duplicate := &MemberInfo{
+		ID:   2,
+		Host: "localhost:27019",
+	}
+	err = rsm.AddMember(duplicate)
+	if err == nil {
+		t.Error("expected error for duplicate member ID")
+	}
+}
+
+// Test AddMember with missing host
+func TestReplicaSetManager_AddMember_NoHost(t *testing.T) {
+	mt := NewMemTransport()
+	cfg := &ClusterConfig{
+		Nodes: []NodeConfig{
+			{ID: 1, Address: "localhost:27017", Voter: true},
+		},
+	}
+
+	eng := &mockEngine{data: make(map[string][]byte)}
+	rs := NewReplicaSet(ReplicaSetConfig{
+		ID:        1,
+		Config:    cfg,
+		Engine:    eng,
+		Transport: mt,
+	})
+
+	rsm := NewReplicaSetManager(rs)
+
+	// Add member with no host
+	member := &MemberInfo{
+		ID: 2,
+		// Host is empty
+	}
+	err := rsm.AddMember(member)
+	if err == nil {
+		t.Error("expected error for missing host")
+	}
+}
+
+// Test AddMember with default priority and votes
+func TestReplicaSetManager_AddMember_Defaults(t *testing.T) {
+	mt := NewMemTransport()
+	cfg := &ClusterConfig{
+		Nodes: []NodeConfig{
+			{ID: 1, Address: "localhost:27017", Voter: true},
+		},
+	}
+
+	eng := &mockEngine{data: make(map[string][]byte)}
+	rs := NewReplicaSet(ReplicaSetConfig{
+		ID:        1,
+		Config:    cfg,
+		Engine:    eng,
+		Transport: mt,
+	})
+
+	rsm := NewReplicaSetManager(rs)
+
+	// Add member with no priority or votes set
+	member := &MemberInfo{
+		ID:   2,
+		Host: "localhost:27018",
+		// Priority and Votes are 0, should get defaults
+	}
+	err := rsm.AddMember(member)
+	if err != nil {
+		t.Logf("AddMember: %v", err)
+	}
+
+	// Check defaults were set
+	if rsm.members[2] == nil {
+		t.Fatal("member not added")
+	}
+	if rsm.members[2].Priority != 1 {
+		t.Errorf("expected default priority=1, got %d", rsm.members[2].Priority)
+	}
+	if rsm.members[2].Votes != 1 {
+		t.Errorf("expected default votes=1, got %d", rsm.members[2].Votes)
+	}
+}
+
+// Test RemoveMember with non-existent member
+func TestReplicaSetManager_RemoveMember_NotFound(t *testing.T) {
+	mt := NewMemTransport()
+	cfg := &ClusterConfig{
+		Nodes: []NodeConfig{
+			{ID: 1, Address: "localhost:27017", Voter: true},
+		},
+	}
+
+	eng := &mockEngine{data: make(map[string][]byte)}
+	rs := NewReplicaSet(ReplicaSetConfig{
+		ID:        1,
+		Config:    cfg,
+		Engine:    eng,
+		Transport: mt,
+	})
+
+	rsm := NewReplicaSetManager(rs)
+
+	// Try to remove member that doesn't exist
+	err := rsm.RemoveMember(999)
+	if err == nil {
+		t.Error("expected error for non-existent member")
+	}
+	if err.Error() != "member 999 not found" {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+// Test AddMember with arbiter (should have priority 0)
+func TestReplicaSetManager_AddMember_Arbiter(t *testing.T) {
+	mt := NewMemTransport()
+	cfg := &ClusterConfig{
+		Nodes: []NodeConfig{
+			{ID: 1, Address: "localhost:27017", Voter: true},
+		},
+	}
+
+	eng := &mockEngine{data: make(map[string][]byte)}
+	rs := NewReplicaSet(ReplicaSetConfig{
+		ID:        1,
+		Config:    cfg,
+		Engine:    eng,
+		Transport: mt,
+	})
+
+	rsm := NewReplicaSetManager(rs)
+
+	// Add arbiter member
+	member := &MemberInfo{
+		ID:      2,
+		Host:    "localhost:27018",
+		Arbiter: true,
+		// Priority should stay 0 for arbiter
+	}
+	err := rsm.AddMember(member)
+	if err != nil {
+		t.Logf("AddMember: %v", err)
+	}
+
+	// Check arbiter priority is 0
+	if rsm.members[2] == nil {
+		t.Fatal("member not added")
+	}
+	if rsm.members[2].Priority != 0 {
+		t.Errorf("expected arbiter priority=0, got %d", rsm.members[2].Priority)
+	}
+}

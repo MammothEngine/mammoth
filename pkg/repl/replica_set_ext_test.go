@@ -319,6 +319,18 @@ func TestMustEncode(t *testing.T) {
 	_ = data
 }
 
+func TestMustEncode_Panic(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("expected panic for unencodable value")
+		}
+	}()
+
+	// Channel cannot be JSON encoded - should panic
+	ch := make(chan int)
+	_ = mustEncode(ch)
+}
+
 // Test ReplicaSet LeaderID method
 func TestReplicaSet_LeaderID(t *testing.T) {
 	dir := t.TempDir()
@@ -441,6 +453,24 @@ func TestPartitionTransport_Register(t *testing.T) {
 	}
 	if resp == nil {
 		t.Log("expected nil response for partition test")
+	}
+}
+
+// Test getMemberStateStr - just verify it returns a value without panic
+func TestReplicaSetManager_GetMemberStateStr(t *testing.T) {
+	dir := t.TempDir()
+	eng, err := engine.Open(engine.DefaultOptions(dir))
+	if err != nil {
+		t.Fatalf("open engine: %v", err)
+	}
+	defer eng.Close()
+
+	rs, rsm := setupTestReplicaSet(t, eng)
+
+	// Just verify the function returns a string without panic
+	result := rsm.getMemberStateStr(rs.ID())
+	if result == "" {
+		t.Error("expected non-empty state string")
 	}
 }
 

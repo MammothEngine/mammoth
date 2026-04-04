@@ -243,3 +243,64 @@ func TestMessage_ResponseHeader(t *testing.T) {
 		t.Errorf("OpCode = %d, want %d (OpReply)", respHeader.OpCode, OpReply)
 	}
 }
+
+func TestMessage_SetReply(t *testing.T) {
+	msg := &Message{}
+
+	reply := &OPReply{
+		ResponseFlags:  0,
+		CursorID:       12345,
+		StartingFrom:   0,
+		NumberReturned: 1,
+		Documents:      []*bson.Document{bson.D("ok", bson.VDouble(1.0))},
+	}
+
+	msg.SetReply(reply)
+
+	if msg.Reply == nil {
+		t.Fatal("SetReply did not set reply")
+	}
+	if msg.Reply.CursorID != 12345 {
+		t.Errorf("Reply CursorID = %d, want 12345", msg.Reply.CursorID)
+	}
+}
+
+func TestMessage_SetMsg(t *testing.T) {
+	msg := &Message{}
+
+	opMsg := &OPMsg{
+		FlagBits: 0,
+		Sections: []Section{
+			{Kind: 0, Body: bson.D("ping", bson.VInt32(1))},
+		},
+	}
+
+	msg.SetMsg(opMsg)
+
+	if msg.Msg == nil {
+		t.Fatal("SetMsg did not set Msg")
+	}
+	if msg.Msg.FlagBits != 0 {
+		t.Error("Msg not set correctly")
+	}
+}
+
+func TestMessage_SetQuery(t *testing.T) {
+	msg := &Message{}
+
+	query := &OPQuery{
+		FullCollectionName: "testdb.users",
+		NumberToSkip:       0,
+		NumberToReturn:     100,
+		Query:              bson.D("find", bson.VString("users")),
+	}
+
+	msg.SetQuery(query)
+
+	if msg.Query == nil {
+		t.Fatal("SetQuery did not set Query")
+	}
+	if msg.Query.FullCollectionName != "testdb.users" {
+		t.Errorf("Query FullCollectionName = %s, want testdb.users", msg.Query.FullCollectionName)
+	}
+}

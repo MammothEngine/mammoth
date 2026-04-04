@@ -423,3 +423,144 @@ func TestValueToString(t *testing.T) {
 		t.Logf("valueToString(%v) = %q", val, got)
 	}
 }
+
+func TestToFloat64(t *testing.T) {
+	tests := []struct {
+		val  bson.Value
+		want float64
+	}{
+		{bson.VInt32(42), 42.0},
+		{bson.VInt64(999), 999.0},
+		{bson.VDouble(3.14), 3.14},
+		{bson.VBool(true), 1.0},
+		{bson.VBool(false), 0.0},
+		{bson.VString("hello"), 0.0}, // Unsupported type returns 0
+		{bson.VNull(), 0.0},          // Unsupported type returns 0
+	}
+
+	for _, tc := range tests {
+		got := toFloat64(tc.val)
+		if got != tc.want {
+			t.Errorf("toFloat64(%v) = %v, want %v", tc.val, got, tc.want)
+		}
+	}
+}
+
+func TestSetNestedValue(t *testing.T) {
+	// Test simple field
+	doc1 := bson.NewDocument()
+	setNestedValue(doc1, "name", bson.VString("Alice"))
+	val, ok := doc1.Get("name")
+	if !ok || val.String() != "Alice" {
+		t.Errorf("expected name=Alice, got %v", val)
+	}
+
+	// Test nested field - creates intermediate documents
+	doc2 := bson.NewDocument()
+	setNestedValue(doc2, "address.city", bson.VString("NYC"))
+	addr, ok := doc2.Get("address")
+	if !ok || addr.Type != bson.TypeDocument {
+		t.Fatal("expected address to be a document")
+	}
+	city, ok := addr.DocumentValue().Get("city")
+	if !ok || city.String() != "NYC" {
+		t.Errorf("expected address.city=NYC, got %v", city)
+	}
+
+	// Test deeply nested field
+	doc3 := bson.NewDocument()
+	setNestedValue(doc3, "a.b.c", bson.VInt32(123))
+	a, _ := doc3.Get("a")
+	b, _ := a.DocumentValue().Get("b")
+	c, _ := b.DocumentValue().Get("c")
+	if c.Int32() != 123 {
+		t.Errorf("expected a.b.c=123, got %v", c)
+	}
+
+	// Test overwriting existing nested document
+	doc4 := bson.D("profile", bson.VDoc(bson.D("age", bson.VInt32(25))))
+	setNestedValue(doc4, "profile.name", bson.VString("Bob"))
+	profile, _ := doc4.Get("profile")
+	name, _ := profile.DocumentValue().Get("name")
+	if name.String() != "Bob" {
+		t.Errorf("expected profile.name=Bob, got %v", name)
+	}
+}
+
+func TestUnsetNested(t *testing.T) {
+	// Test simple field
+	doc1 := bson.D("name", bson.VString("Alice"), "age", bson.VInt32(30))
+	unsetNested(doc1, "name")
+	if _, ok := doc1.Get("name"); ok {
+		t.Error("name should have been deleted")
+	}
+	if _, ok := doc1.Get("age"); !ok {
+		t.Error("age should still exist")
+	}
+
+	// Test nested field
+	doc2 := bson.D("address", bson.VDoc(bson.D("city", bson.VString("NYC"), "zip", bson.VString("10001"))))
+	unsetNested(doc2, "address.city")
+	addr, _ := doc2.Get("address")
+	if _, ok := addr.DocumentValue().Get("city"); ok {
+		t.Error("address.city should have been deleted")
+	}
+	if _, ok := addr.DocumentValue().Get("zip"); !ok {
+		t.Error("address.zip should still exist")
+	}
+
+	// Test unset on non-existent path
+	doc3 := bson.NewDocument()
+	unsetNested(doc3, "missing.field") // Should not panic
+
+	// Test unset on non-document intermediate
+	doc4 := bson.D("data", bson.VString("not a doc"))
+	unsetNested(doc4, "data.field") // Should not panic or modify
+}
+
+func TestExprSubstrEdgeCases(t *testing.T) {
+	// Empty array - should return empty string
+	doc := bson.D("name", bson.VString("Hello"))
+	emptyArrExpr := bson.VDoc(bson.D("$substr", bson.VArray(bson.A())))
+	v := evaluateExpr(emptyArrExpr, doc)
+	if v.Type != bson.TypeString || v.String() != "" {
+		t.Errorf("expected empty string for empty array, got %v", v)
+	}
+
+	// Array with only 1 element - should return empty string
+	singleArrExpr := bson.VDoc(bson.D("$substr", bson.VArray(bson.A(bson.VString("$name")))))
+	v2 := evaluateExpr(singleArrExpr, doc)
+	if v2.Type != bson.TypeString || v2.String() != "" {
+		t.Errorf("expected empty string for single element array, got %v", v2)
+	}
+
+	// Non-string input - should return empty string
+	numDoc := bson.D("num", bson.VInt32(123))
+	nonStringExpr := bson.VDoc(bson.D("$substr", bson.VArray(bson.A(bson.VString("$num"), bson.VInt32(0), bson.VInt32(2)))))
+	v3 := evaluateExpr(nonStringExpr, numDoc)
+	if v3.Type != bson.TypeString || v3.String() != "" {
+		t.Errorf("expected empty string for non-string input, got %v", v3)
+	}
+
+	// Start beyond string length - should return empty string
+	strDoc := bson.D("str", bson.VString("hi"))
+	beyondExpr := bson.VDoc(bson.D("$substr", bson.VArray(bson.A(bson.VString("$str"), bson.VInt32(10), bson.VInt32(5)))))
+	v4 := evaluateExpr(beyondExpr, strDoc)
+	if v4.Type != bson.TypeString || v4.String() != "" {
+		t.Errorf("expected empty string when start > len, got %v", v4)
+	}
+
+	// Negative start - should be treated as 0
+	negStartExpr := bson.VDoc(bson.D("$substr", bson.VArray(bson.A(bson.VString("$str"), bson.VInt32(-5), bson.VInt32(2)))))
+	v5 := evaluateExpr(negStartExpr, strDoc)
+	if v5.Type != bson.TypeString || v5.String() != "hi" {
+		t.Errorf("expected 'hi' for negative start, got %v", v5)
+	}
+
+	// Length beyond string end - should truncate
+	longLenExpr := bson.VDoc(bson.D("$substr", bson.VArray(bson.A(bson.VString("$str"), bson.VInt32(0), bson.VInt32(100)))))
+	v6 := evaluateExpr(longLenExpr, strDoc)
+	if v6.Type != bson.TypeString || v6.String() != "hi" {
+		t.Errorf("expected 'hi' for long length, got %v", v6)
+	}
+}

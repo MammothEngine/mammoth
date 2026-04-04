@@ -93,3 +93,46 @@ func TestHandleConnectionStatus(t *testing.T) {
 		t.Error("connectionStatus should include authInfo document")
 	}
 }
+
+func TestHandleStartSession(t *testing.T) {
+	h, eng := setupTestHandler(t)
+	defer eng.Close()
+	defer h.Close()
+
+	msg := makeMessage("startSession")
+	resp := h.Handle(msg)
+	if ok, _ := resp.Get("ok"); ok.Double() != 1.0 {
+		t.Errorf("startSession ok = %v, want 1.0", ok.Double())
+	}
+
+	// Should include id document with an ObjectID
+	idVal, ok := resp.Get("id")
+	if !ok || idVal.Type != bson.TypeDocument {
+		t.Fatal("startSession should return id document")
+	}
+	idDoc := idVal.DocumentValue()
+	if oidVal, ok := idDoc.Get("id"); !ok || oidVal.Type != bson.TypeObjectID {
+		t.Errorf("startSession id document should contain ObjectID, got type %v", oidVal.Type)
+	}
+}
+
+func TestHandleGetCmdLineOpts(t *testing.T) {
+	h, eng := setupTestHandler(t)
+	defer eng.Close()
+	defer h.Close()
+
+	msg := makeMessage("getCmdLineOpts")
+	resp := h.Handle(msg)
+	if ok, _ := resp.Get("ok"); ok.Double() != 1.0 {
+		t.Errorf("getCmdLineOpts ok = %v, want 1.0", ok.Double())
+	}
+
+	// Should include argv and parsed
+	if _, ok := resp.Get("argv"); !ok {
+		t.Error("getCmdLineOpts should return argv")
+	}
+	parsed, ok := resp.Get("parsed")
+	if !ok || parsed.Type != bson.TypeDocument {
+		t.Error("getCmdLineOpts should return parsed document")
+	}
+}

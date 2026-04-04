@@ -1,6 +1,7 @@
 package ratelimit
 
 import (
+	"context"
 	"testing"
 	"time"
 )
@@ -288,5 +289,113 @@ func TestManagerGetLimiterAutoCreate(t *testing.T) {
 	l3 := mgr.GetLimiter(2)
 	if l3 == l1 {
 		t.Error("expected different limiter for different key")
+	}
+}
+
+// TestUnlimitedLimiterMethods tests Unlimited limiter's Rate and Burst methods
+func TestUnlimitedLimiterMethods(t *testing.T) {
+	ul := Unlimited()
+
+	// Rate should return max value
+	if ul.Rate() != Rate(1<<63-1) {
+		t.Errorf("Unlimited.Rate() = %v, want max", ul.Rate())
+	}
+
+	// Burst should return max value
+	if ul.Burst() != 1<<31-1 {
+		t.Errorf("Unlimited.Burst() = %v, want max", ul.Burst())
+	}
+
+	// WaitN should always return nil
+	ctx := context.Background()
+	if err := ul.WaitN(ctx, 100); err != nil {
+		t.Errorf("Unlimited.WaitN() should return nil, got %v", err)
+	}
+}
+
+
+
+// TestManagerUpdateConfig tests Manager.UpdateConfig
+func TestManagerUpdateConfig(t *testing.T) {
+	mgr := NewManager(Config{
+		RequestsPerSecond: 100,
+		Burst:             10,
+		Enabled:           true,
+	})
+	defer mgr.Close()
+
+	// Update config - should not panic
+	newConfig := Config{
+		RequestsPerSecond: 200,
+		Burst:             20,
+		Enabled:           true,
+	}
+	mgr.UpdateConfig(newConfig)
+
+	// Disable and verify behavior changes
+	mgr.UpdateConfig(Config{Enabled: false})
+
+	// After disabling, Allow should always return true (unlimited)
+	if !mgr.Allow(1) {
+		t.Error("Allow should return true when disabled")
+	}
+}
+
+
+// TestTokenBucketWaitNTimeout tests TokenBucket.WaitN with timeout
+func TestTokenBucketWaitNTimeout(t *testing.T) {
+	tb := NewTokenBucket(Rate(1), 1)
+
+	// Exhaust tokens
+	tb.Allow()
+
+	// Try to wait for more than burst
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+
+	// Should timeout
+	err := tb.WaitN(ctx, 10)
+	if err == nil {
+		t.Error("expected timeout error for n > burst")
+	}
+}
+
+// TestReservationCancelNoOp tests Cancel when not implemented
+func TestReservationCancelNoOp(t *testing.T) {
+	// Create a reservation directly (not through limiter)
+	r := &Reservation{
+		Ok:        true,
+		TimeToAct: time.Now(),
+		Limit:     Rate(10),
+	}
+
+	// Cancel should not panic even though it has no limiter reference
+	r.Cancel()
+}
+
+// TestManagerAllowNGlobal tests Manager.AllowN with global limiting
+func TestManagerAllowNGlobal(t *testing.T) {
+	mgr := NewManager(Config{
+		RequestsPerSecond: 1000,
+		Burst:             1000,
+		GlobalRate:        10,
+		GlobalBurst:       5,
+		Enabled:           true,
+		PerConnection:     false,
+	})
+	defer mgr.Close()
+
+	connID := uint64(1)
+
+	// Should be limited by global burst of 5
+	for i := 0; i < 5; i++ {
+		if !mgr.AllowN(connID, 1) {
+			t.Errorf("expected allow at iteration %d", i)
+		}
+	}
+
+	// Should deny now due to global limit
+	if mgr.AllowN(connID, 1) {
+		t.Error("expected deny after global burst exhausted")
 	}
 }

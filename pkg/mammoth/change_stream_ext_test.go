@@ -4,6 +4,9 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/mammothengine/mammoth/pkg/bson"
+	"github.com/mammothengine/mammoth/pkg/repl"
 )
 
 // Test matchFilter with operationType
@@ -240,6 +243,112 @@ func TestChangeStream_ResumeToken_Ext(t *testing.T) {
 	}
 }
 
+// Test Database.Watch
+func TestDatabase_Watch(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+
+	// Watch without options
+	cs, err := db.Watch(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("Watch: %v", err)
+	}
+	defer cs.Close()
+
+	if cs.db != db {
+		t.Error("ChangeStream should reference the database")
+	}
+
+	// Watch with options
+	opts := ChangeStreamOptions{
+		FullDocument: Required,
+		ResumeAfter:  &ResumeToken{Data: "test-token"},
+	}
+	cs2, err := db.Watch(context.Background(), nil, opts)
+	if err != nil {
+		t.Fatalf("Watch with options: %v", err)
+	}
+	defer cs2.Close()
+}
+
+// Test Collection.Watch
+func TestCollection_Watch(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+
+	coll, _ := db.Collection("watch_test")
+
+	// Watch without options
+	cs, err := coll.Watch(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("Watch: %v", err)
+	}
+	defer cs.Close()
+
+	if cs.coll != coll {
+		t.Error("ChangeStream should reference the collection")
+	}
+
+	// Test with pipeline
+	pipeline := []PipelineStage{
+		Match(map[string]interface{}{"operationType": "insert"}),
+	}
+	cs2, err := coll.Watch(context.Background(), pipeline)
+	if err != nil {
+		t.Fatalf("Watch with pipeline: %v", err)
+	}
+	defer cs2.Close()
+
+	if len(cs2.pipeline) != 1 {
+		t.Errorf("pipeline length = %d, want 1", len(cs2.pipeline))
+	}
+}
+
+// Test change stream with options
+func TestChangeStream_Options(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+
+	coll, _ := db.Collection("options_test")
+
+	// Test with FullDocumentOff
+	opts := ChangeStreamOptions{FullDocument: Off}
+	cs, err := coll.Watch(context.Background(), nil, opts)
+	if err != nil {
+		t.Fatalf("Watch with Off: %v", err)
+	}
+	if cs.opts.FullDocument != Off {
+		t.Errorf("FullDocument = %v, want Off", cs.opts.FullDocument)
+	}
+	cs.Close()
+
+	// Test with FullDocumentWhenAvailable
+	opts2 := ChangeStreamOptions{FullDocument: WhenAvailable}
+	cs2, err := coll.Watch(context.Background(), nil, opts2)
+	if err != nil {
+		t.Fatalf("Watch with WhenAvailable: %v", err)
+	}
+	if cs2.opts.FullDocument != WhenAvailable {
+		t.Errorf("FullDocument = %v, want WhenAvailable", cs2.opts.FullDocument)
+	}
+	cs2.Close()
+}
+
+// Test newChangeStream with nil collection and database
+func TestNewChangeStream_NilParams(t *testing.T) {
+	// This tests the edge case where both coll and db are nil
+	// which should result in an empty namespace
+	cs, err := newChangeStream(context.Background(), nil, nil, nil, ChangeStreamOptions{}, nil)
+	if err != nil {
+		t.Fatalf("newChangeStream with nil params: %v", err)
+	}
+	defer cs.Close()
+
+	if cs.ns != "" {
+		t.Errorf("ns = %q, want empty string", cs.ns)
+	}
+}
+
 // Test ChangeStream Err
 func TestChangeStream_Err_Ext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -432,3 +541,222 @@ func TestMatchesPipeline_Ext(t *testing.T) {
 		t.Error("matchesPipeline should handle $project stage")
 	}
 }
+
+// Test ChangeStream Decode with different options
+func TestChangeStream_Decode_Ext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cs := &ChangeStream{
+		ctx:    ctx,
+		cancel: cancel,
+		buffer: []*ChangeEvent{
+			{
+				OperationType: "insert",
+				NS:            Namespace{DB: "test", Coll: "coll"},
+				FullDocument:  map[string]interface{}{"name": "Alice", "age": 30},
+			},
+		},
+		position: 0,
+	}
+
+	// Decode current event
+	var event ChangeEvent
+	if err := cs.Decode(&event); err != nil {
+		t.Errorf("Decode: %v", err)
+	}
+	if event.OperationType != "insert" {
+		t.Errorf("OperationType = %s, want insert", event.OperationType)
+	}
+
+	// Test Decode with invalid argument
+	var invalid string
+	if err := cs.Decode(&invalid); err == nil {
+		t.Error("Decode should fail for invalid argument type")
+	}
+
+	// Test Decode with nil
+	if err := cs.Decode(nil); err == nil {
+		t.Error("Decode should fail for nil")
+	}
+}
+
+// Test ChangeStream Next with event application
+func TestChangeStream_Next_Ext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cs := &ChangeStream{
+		ctx:      ctx,
+		cancel:   cancel,
+		buffer:   []*ChangeEvent{},
+		position: -1,
+		started:  true,
+	}
+
+	// Add events to buffer
+	cs.buffer = append(cs.buffer, &ChangeEvent{
+		OperationType: "insert",
+		NS:            Namespace{DB: "test", Coll: "coll"},
+	})
+
+	// Next should advance and return true
+	if !cs.Next() {
+		t.Error("Next should return true when events available")
+	}
+
+	if cs.position != 0 {
+		t.Errorf("position = %d, want 0", cs.position)
+	}
+}
+
+// Test ChangeStream Next when closed
+func TestChangeStream_Next_Closed(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cs := &ChangeStream{
+		ctx:      ctx,
+		cancel:   cancel,
+		buffer:   []*ChangeEvent{{OperationType: "insert"}},
+		position: -1,
+		closed:   true,
+		started:  true,
+	}
+
+	// Next should return false when closed
+	if cs.Next() {
+		t.Error("Next should return false when closed")
+	}
+}
+
+// Test getString helper
+func TestGetString_Ext(t *testing.T) {
+	m := map[string]interface{}{
+		"str":    "value",
+		"int":    42,
+		"bool":   true,
+	}
+
+	if got := getString(m, "str"); got != "value" {
+		t.Errorf("getString(str) = %q, want 'value'", got)
+	}
+	if got := getString(m, "int"); got != "42" {
+		t.Errorf("getString(int) = %q, want '42'", got)
+	}
+	if got := getString(m, "bool"); got != "true" {
+		t.Errorf("getString(bool) = %q, want 'true'", got)
+	}
+	if got := getString(m, "missing"); got != "" {
+		t.Errorf("getString(missing) = %q, want empty", got)
+	}
+}
+
+// Test convertOplogEntry with different operation types
+func TestConvertOplogEntry(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+
+	coll, _ := db.Collection("convert_test")
+	cs, _ := coll.Watch(context.Background(), nil)
+	defer cs.Close()
+
+	// Test insert operation
+	insertEntry := &repl.OplogEntry{
+		Timestamp: time.Now(),
+		Namespace: "test.convert_test",
+		Operation: repl.OpInsert,
+		Object:    bson.D("_id", bson.VString("doc1"), "name", bson.VString("Alice")),
+	}
+
+	event := cs.convertOplogEntry(insertEntry)
+	if event == nil {
+		t.Fatal("convertOplogEntry returned nil for insert")
+	}
+	if event.OperationType != "insert" {
+		t.Errorf("OperationType = %s, want insert", event.OperationType)
+	}
+	if event.FullDocument["name"] != "Alice" {
+		t.Errorf("FullDocument.name = %v, want Alice", event.FullDocument["name"])
+	}
+
+	// Test update operation
+	updateEntry := &repl.OplogEntry{
+		Timestamp: time.Now(),
+		Namespace: "test.convert_test",
+		Operation: repl.OpUpdate,
+		Object:    bson.D("$set", bson.VDoc(bson.D("name", bson.VString("Bob")))),
+		Object2:   bson.D("_id", bson.VString("doc1")),
+	}
+
+	event = cs.convertOplogEntry(updateEntry)
+	if event == nil {
+		t.Fatal("convertOplogEntry returned nil for update")
+	}
+	if event.OperationType != "update" {
+		t.Errorf("OperationType = %s, want update", event.OperationType)
+	}
+	if event.UpdateDescription == nil {
+		t.Error("UpdateDescription should not be nil for update")
+	}
+
+	// Test delete operation
+	deleteEntry := &repl.OplogEntry{
+		Timestamp: time.Now(),
+		Namespace: "test.convert_test",
+		Operation: repl.OpDelete,
+		Object:    bson.D("_id", bson.VString("doc1")),
+	}
+
+	event = cs.convertOplogEntry(deleteEntry)
+	if event == nil {
+		t.Fatal("convertOplogEntry returned nil for delete")
+	}
+	if event.OperationType != "delete" {
+		t.Errorf("OperationType = %s, want delete", event.OperationType)
+	}
+
+	// Test noop operation - should return nil
+	noopEntry := &repl.OplogEntry{
+		Timestamp: time.Now(),
+		Namespace: "test.convert_test",
+		Operation: repl.OpNoop,
+	}
+
+	event = cs.convertOplogEntry(noopEntry)
+	if event != nil {
+		t.Error("convertOplogEntry should return nil for noop")
+	}
+
+}
+
+// Test getInt64 helper
+func TestGetInt64_Ext(t *testing.T) {
+	m := map[string]interface{}{
+		"int":     int(42),
+		"int32":   int32(100),
+		"int64":   int64(999),
+		"float64": float64(123.45),
+		"string":  "not a number",
+	}
+
+	if got := getInt64(m, "int"); got != 42 {
+		t.Errorf("getInt64(int) = %d, want 42", got)
+	}
+	if got := getInt64(m, "int32"); got != 100 {
+		t.Errorf("getInt64(int32) = %d, want 100", got)
+	}
+	if got := getInt64(m, "int64"); got != 999 {
+		t.Errorf("getInt64(int64) = %d, want 999", got)
+	}
+	if got := getInt64(m, "float64"); got != 123 {
+		t.Errorf("getInt64(float64) = %d, want 123", got)
+	}
+	if got := getInt64(m, "string"); got != 0 {
+		t.Errorf("getInt64(string) = %d, want 0", got)
+	}
+	if got := getInt64(m, "missing"); got != 0 {
+		t.Errorf("getInt64(missing) = %d, want 0", got)
+	}
+}
+

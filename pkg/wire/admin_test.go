@@ -253,6 +253,105 @@ func TestHandleListIndexes(t *testing.T) {
 	}
 }
 
+func TestHandleListIndexes_WithIndexes(t *testing.T) {
+	h, eng := setupTestHandler(t)
+	defer eng.Close()
+	defer h.Close()
+
+	h.cat.EnsureCollection("testdb", "testcoll")
+
+	// Create a real index via createIndexes command
+	keyDoc := bson.NewDocument()
+	keyDoc.Set("email", bson.VInt32(1))
+
+	idxDoc := bson.NewDocument()
+	idxDoc.Set("name", bson.VString("email_idx"))
+	idxDoc.Set("key", bson.VDoc(keyDoc))
+	idxDoc.Set("unique", bson.VBool(true))
+
+	indexes := bson.A(bson.VDoc(idxDoc))
+
+	createBody := bson.NewDocument()
+	createBody.Set("createIndexes", bson.VString("testcoll"))
+	createBody.Set("$db", bson.VString("testdb"))
+	createBody.Set("indexes", bson.VArray(indexes))
+
+	createMsg := &Message{
+		Header: MsgHeader{OpCode: OpMsg},
+		Msg:    &OPMsg{Sections: []Section{{Kind: 0, Body: createBody}}},
+	}
+	h.Handle(createMsg)
+
+	// Now list indexes
+	listBody := bson.NewDocument()
+	listBody.Set("listIndexes", bson.VString("testcoll"))
+	listBody.Set("$db", bson.VString("testdb"))
+
+	listMsg := &Message{
+		Header: MsgHeader{OpCode: OpMsg},
+		Msg:    &OPMsg{Sections: []Section{{Kind: 0, Body: listBody}}},
+	}
+
+	resp := h.Handle(listMsg)
+	if ok, _ := resp.Get("ok"); ok.Double() != 1.0 {
+		t.Errorf("listIndexes ok = %v, want 1.0", ok.Double())
+	}
+
+	cursorVal, _ := resp.Get("cursor")
+	cursorDoc := cursorVal.DocumentValue()
+	batchVal, _ := cursorDoc.Get("firstBatch")
+	firstBatch := batchVal.ArrayValue()
+
+	// Should have at least _id_ and email_idx
+	if len(firstBatch) < 2 {
+		t.Errorf("expected at least 2 indexes, got %d", len(firstBatch))
+	}
+
+	// Verify email_idx exists and has unique flag
+	foundEmailIdx := false
+	for _, idxVal := range firstBatch {
+		idxDoc := idxVal.DocumentValue()
+		if nameVal, ok := idxDoc.Get("name"); ok && nameVal.String() == "email_idx" {
+			foundEmailIdx = true
+			if uniqueVal, ok := idxDoc.Get("unique"); !ok || !uniqueVal.Boolean() {
+				t.Error("email_idx should have unique=true")
+			}
+			// Verify descending index key
+			if keyVal, ok := idxDoc.Get("key"); ok {
+				keyDoc := keyVal.DocumentValue()
+				if emailVal, ok := keyDoc.Get("email"); !ok || emailVal.Int32() != 1 {
+					t.Error("email_idx key should be {email: 1}")
+				}
+			}
+		}
+	}
+	if !foundEmailIdx {
+		t.Error("email_idx not found in listIndexes result")
+	}
+}
+
+func TestHandleListIndexes_NoCollection(t *testing.T) {
+	h, eng := setupTestHandler(t)
+	defer eng.Close()
+	defer h.Close()
+
+	body := bson.NewDocument()
+	body.Set("listIndexes", bson.VString("nonexistentcoll"))
+	body.Set("$db", bson.VString("testdb"))
+
+	msg := &Message{
+		Header: MsgHeader{OpCode: OpMsg},
+		Msg:    &OPMsg{Sections: []Section{{Kind: 0, Body: body}}},
+	}
+
+	resp := h.Handle(msg)
+	// Should still return ok with just _id_ index (creates collection implicitly or returns empty)
+	_, hasOk := resp.Get("ok")
+	if !hasOk {
+		t.Error("listIndexes should return ok field even for non-existent collection")
+	}
+}
+
 func TestHandleCollMod(t *testing.T) {
 	h, eng := setupTestHandler(t)
 	defer eng.Close()

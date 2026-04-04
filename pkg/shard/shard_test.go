@@ -1396,3 +1396,100 @@ func TestScatterGather_WithErrors(t *testing.T) {
 		t.Error("Expected error or empty results with no engines connected")
 	}
 }
+
+// Test Stop when already stopped
+func TestBalancer_Stop_AlreadyStopped(t *testing.T) {
+	cfg, router, cleanup := setupShardTest(t)
+	defer cleanup()
+
+	balancer := NewBalancer(cfg, router)
+
+	// Stop when not running should not panic
+	balancer.Stop()
+
+	// Stop again should not panic (early return path)
+	balancer.Stop()
+}
+
+// Test Start when already running
+func TestBalancer_Start_AlreadyRunning(t *testing.T) {
+	cfg, router, cleanup := setupShardTest(t)
+	defer cleanup()
+
+	balancer := NewBalancer(cfg, router)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Start the balancer
+	go balancer.Start(ctx)
+	time.Sleep(100 * time.Millisecond)
+
+	// Try to start again (should return early)
+	go balancer.Start(ctx)
+	time.Sleep(50 * time.Millisecond)
+
+	// Should still be running
+	if !balancer.IsRunning() {
+		t.Error("Balancer should still be running")
+	}
+}
+
+// Test compareShardKey with type mismatches
+func TestCompareShardKey_TypeMismatch(t *testing.T) {
+	// String vs int64
+	result := compareShardKey("test", int64(42))
+	if result != 0 {
+		t.Error("Type mismatch should return 0")
+	}
+
+	// int64 vs float64
+	result = compareShardKey(int64(42), float64(3.14))
+	if result != 0 {
+		t.Error("Type mismatch should return 0")
+	}
+
+	// float64 vs string
+	result = compareShardKey(float64(3.14), "test")
+	if result != 0 {
+		t.Error("Type mismatch should return 0")
+	}
+}
+
+// Test compareShardKey with unknown type
+func TestCompareShardKey_UnknownType(t *testing.T) {
+	result := compareShardKey(true, true)
+	if result != 0 {
+		t.Error("Unknown type should return 0")
+	}
+}
+
+// Test compareShardKey with different length compound keys
+func TestCompareShardKey_CompoundDifferentLength(t *testing.T) {
+	arr1 := []interface{}{"TR", int64(5)}
+	arr2 := []interface{}{"TR"}
+
+	result := compareShardKey(arr1, arr2)
+	if result != 1 { // arr1 is longer
+		t.Errorf("Expected 1 (arr1 longer), got %d", result)
+	}
+
+	result = compareShardKey(arr2, arr1)
+	if result != -1 { // arr2 is shorter
+		t.Errorf("Expected -1 (arr2 shorter), got %d", result)
+	}
+}
+
+// Test RouteForWrite with no shards available
+func TestRouter_RouteForWrite_NoShards(t *testing.T) {
+	cfg := NewConfig()
+	router := NewRouter(cfg)
+
+	doc := bson.NewDocument()
+	doc.Set("name", bson.VString("test"))
+
+	_, err := router.RouteForWrite("testdb.users", doc)
+	if err == nil {
+		t.Error("Expected error when no shards available")
+	}
+}

@@ -2,6 +2,7 @@ package mammoth
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -58,6 +59,25 @@ func TestCompareValues(t *testing.T) {
 		{"time after", time.Unix(2000, 0), time.Unix(1000, 0), 1},
 		{"different types - string vs int", "abc", 5, 1},  // strings compare greater than numbers
 		{"different types - int vs string", 5, "abc", -1}, // numbers compare less than strings
+		// Additional int32 comparison paths
+		{"int32 with int - less", int32(5), 10, -1},
+		{"int32 with int - greater", int32(10), 5, 1},
+		{"int32 with int64 - less", int32(5), int64(10), -1},
+		{"int32 with int64 - greater", int32(10), int64(5), 1},
+		{"int32 with float64 - less", int32(5), float64(10), -1},
+		{"int32 with float64 - greater", int32(10), float64(5), 1},
+		// Additional int64 comparison paths
+		{"int64 with int - less", int64(5), 10, -1},
+		{"int64 with int - greater", int64(10), 5, 1},
+		{"int64 with int32 - less", int64(5), int32(10), -1},
+		{"int64 with int32 - greater", int64(10), int32(5), 1},
+		// Additional float64 comparison paths
+		{"float64 with int - less", float64(5), 10, -1},
+		{"float64 with int - greater", float64(10), 5, 1},
+		{"float64 with int32 - less", float64(5), int32(10), -1},
+		{"float64 with int32 - greater", float64(10), int32(5), 1},
+		{"float64 with int64 - less", float64(5), int64(10), -1},
+		{"float64 with int64 - greater", float64(10), int64(5), 1},
 	}
 
 	for _, tt := range tests {
@@ -406,6 +426,7 @@ func TestInterfaceToBSONValue(t *testing.T) {
 		{"bytes", []byte{1, 2, 3}, bson.VBinary(bson.BinaryGeneric, []byte{1, 2, 3})},
 		{"[]string", []string{"a", "b"}, bson.VArray(bson.A(bson.VString("a"), bson.VString("b")))},
 		{"nested map", map[string]interface{}{"nested": "value"}, bson.VDoc(bson.D("nested", bson.VString("value")))},
+		{"[]interface{}", []interface{}{"a", 42, true}, bson.VArray(bson.A(bson.VString("a"), bson.VInt32(42), bson.VBool(true)))},
 		{"default type", struct{ Name string }{Name: "test"}, bson.VNull()},
 	}
 
@@ -809,5 +830,408 @@ func TestGetMap(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// Test CreateIndex with various options and edge cases
+func TestCreateIndex_Options(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+
+	// Create collection first (needed for index creation)
+	coll, _ := db.Collection("test_coll")
+	coll.InsertOne(map[string]interface{}{"_id": "init"})
+
+	// Test empty keys error
+	_, err := db.CreateIndex("test_coll", map[string]interface{}{})
+	if err == nil {
+		t.Error("expected error for empty index keys")
+	}
+
+	// Test with int32 direction
+	_, err = db.CreateIndex("test_coll", map[string]interface{}{"field1": int32(1)})
+	if err != nil {
+		t.Errorf("CreateIndex with int32: %v", err)
+	}
+
+	// Test with int64 direction
+	_, err = db.CreateIndex("test_coll", map[string]interface{}{"field2": int64(-1)})
+	if err != nil {
+		t.Errorf("CreateIndex with int64: %v", err)
+	}
+
+	// Test with float64 direction
+	_, err = db.CreateIndex("test_coll", map[string]interface{}{"field3": float64(1)})
+	if err != nil {
+		t.Errorf("CreateIndex with float64: %v", err)
+	}
+
+	// Test with custom name option
+	name, err := db.CreateIndex("test_coll", map[string]interface{}{"field4": 1}, IndexOptions{Name: "custom_name"})
+	if err != nil {
+		t.Errorf("CreateIndex with custom name: %v", err)
+	}
+	if name != "custom_name" {
+		t.Errorf("expected index name 'custom_name', got %q", name)
+	}
+
+	// Test with unique option
+	_, err = db.CreateIndex("test_coll", map[string]interface{}{"field5": 1}, IndexOptions{Unique: true})
+	if err != nil {
+		t.Errorf("CreateIndex with unique: %v", err)
+	}
+
+	// Test with sparse option
+	_, err = db.CreateIndex("test_coll", map[string]interface{}{"field6": 1}, IndexOptions{Sparse: true})
+	if err != nil {
+		t.Errorf("CreateIndex with sparse: %v", err)
+	}
+
+	// Test with all options combined
+	_, err = db.CreateIndex("test_coll", map[string]interface{}{"field7": 1}, IndexOptions{
+		Name:   "combined_idx",
+		Unique: true,
+		Sparse: true,
+	})
+	if err != nil {
+		t.Errorf("CreateIndex with all options: %v", err)
+	}
+}
+
+// Test CollectionTx_UpdateOne_NotFound tests update when document doesn't exist
+func TestCollectionTx_UpdateOne_NotFound(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+
+	coll, _ := db.Collection("tx_update_nf")
+
+	err := db.WithTransaction(context.Background(), func(tx *Transaction) error {
+		ct := coll.WithTransaction(tx)
+		// Try to update a non-existent document
+		updated, err := ct.UpdateOne(
+			map[string]interface{}{"_id": "nonexistent"},
+			map[string]interface{}{"$set": map[string]interface{}{"value": 42}},
+		)
+		if err != nil {
+			return err
+		}
+		if updated != 0 {
+			t.Errorf("expected 0 updated for non-existent doc, got %d", updated)
+		}
+		return nil
+	})
+
+	if err != nil {
+		t.Errorf("WithTransaction: %v", err)
+	}
+}
+
+// Test ListIndexes and DropIndex
+func TestListIndexesAndDropIndex(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+
+	collName := "idx_test_coll"
+
+	// Create collection first
+	coll, _ := db.Collection(collName)
+	coll.InsertOne(map[string]interface{}{"_id": "init"})
+
+	// Create some indexes
+	_, err := db.CreateIndex(collName, map[string]interface{}{"name": 1})
+	if err != nil {
+		t.Fatalf("CreateIndex: %v", err)
+	}
+
+	_, err = db.CreateIndex(collName, map[string]interface{}{"age": -1}, IndexOptions{Unique: true})
+	if err != nil {
+		t.Fatalf("CreateIndex: %v", err)
+	}
+
+	// List indexes
+	indexes, err := db.ListIndexes(collName)
+	if err != nil {
+		t.Fatalf("ListIndexes: %v", err)
+	}
+
+	// Should have at least 2 indexes (including _id_)
+	if len(indexes) < 2 {
+		t.Errorf("expected at least 2 indexes, got %d", len(indexes))
+	}
+
+	// Find and drop a specific index
+	var idxToDrop string
+	for _, idx := range indexes {
+		if idx.Name != "_id_" {
+			idxToDrop = idx.Name
+			break
+		}
+	}
+
+	if idxToDrop != "" {
+		err = db.DropIndex(collName, idxToDrop)
+		if err != nil {
+			t.Errorf("DropIndex: %v", err)
+		}
+
+		// Verify index is dropped
+		indexes, _ = db.ListIndexes(collName)
+		found := false
+		for _, idx := range indexes {
+			if idx.Name == idxToDrop {
+				found = true
+				break
+			}
+		}
+		if found {
+			t.Errorf("index %q should have been dropped", idxToDrop)
+		}
+	}
+}
+
+// Test FindWithOptions with projection
+func TestFindWithOptions_Projection(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+
+	coll, _ := db.Collection("projection_test")
+
+	// Insert test documents
+	for i := 0; i < 5; i++ {
+		coll.InsertOne(map[string]interface{}{
+			"_id":   fmt.Sprintf("doc%d", i),
+			"name":  fmt.Sprintf("Name%d", i),
+			"value": i * 10,
+			"extra": "hidden",
+		})
+	}
+
+	// Find with projection - only include name and value
+	cursor, err := coll.FindWithOptions(FindOptions{
+		Filter:     map[string]interface{}{},
+		Projection: map[string]interface{}{"name": 1, "value": 1},
+	})
+	if err != nil {
+		t.Fatalf("FindWithOptions: %v", err)
+	}
+	defer cursor.Close()
+
+	count := 0
+	for cursor.Next() {
+		var doc map[string]interface{}
+		if err := cursor.Decode(&doc); err != nil {
+			t.Errorf("Decode: %v", err)
+			continue
+		}
+		// Should have _id, name, value but not extra
+		if _, ok := doc["_id"]; !ok {
+			t.Error("expected _id in projected result")
+		}
+		if _, ok := doc["name"]; !ok {
+			t.Error("expected name in projected result")
+		}
+		if _, ok := doc["value"]; !ok {
+			t.Error("expected value in projected result")
+		}
+		// "extra" should not be present
+		if _, ok := doc["extra"]; ok {
+			t.Error("extra should not be in projected result")
+		}
+		count++
+	}
+
+	if count != 5 {
+		t.Errorf("expected 5 documents, got %d", count)
+	}
+}
+
+// Test compareDocs with missing fields
+func TestCompareDocs_MissingFields(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+
+	coll, _ := db.Collection("compare_test")
+
+	// Insert documents with different fields
+	coll.InsertOne(map[string]interface{}{"_id": "1", "name": "Alice", "age": 30})
+	coll.InsertOne(map[string]interface{}{"_id": "2", "name": "Bob"})         // missing age
+	coll.InsertOne(map[string]interface{}{"_id": "3", "age": 25})              // missing name
+	coll.InsertOne(map[string]interface{}{"_id": "4", "name": "Charlie", "age": 35})
+
+	// Sort by age - missing age should sort last
+	cursor, err := coll.FindWithOptions(FindOptions{
+		Filter: map[string]interface{}{},
+		Sort:   map[string]interface{}{"age": 1},
+	})
+	if err != nil {
+		t.Fatalf("FindWithOptions: %v", err)
+	}
+	defer cursor.Close()
+
+	var ids []string
+	for cursor.Next() {
+		var doc map[string]interface{}
+		cursor.Decode(&doc)
+		ids = append(ids, doc["_id"].(string))
+	}
+
+	// "3" (age 25) should be first, "1" (30) second, "4" (35) third
+	// "2" (missing age) should be last
+	expected := []string{"3", "1", "4", "2"}
+	for i, id := range ids {
+		if i < len(expected) && id != expected[i] {
+			t.Errorf("position %d: expected %s, got %s", i, expected[i], id)
+		}
+	}
+}
+
+// Test FindWithOptions with Skip and Limit
+func TestFindWithOptions_SkipLimit(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+
+	coll, _ := db.Collection("skip_limit_test")
+
+	// Insert 10 documents
+	for i := 0; i < 10; i++ {
+		coll.InsertOne(map[string]interface{}{"_id": fmt.Sprintf("doc%d", i), "value": i})
+	}
+
+	// Test Skip
+	cursor, err := coll.FindWithOptions(FindOptions{
+		Filter: nil,
+		Skip:   5,
+	})
+	if err != nil {
+		t.Fatalf("FindWithOptions with Skip: %v", err)
+	}
+
+	count := 0
+	for cursor.Next() {
+		count++
+	}
+	if count != 5 {
+		t.Errorf("Skip 5: expected 5 results, got %d", count)
+	}
+
+	// Test Limit
+	cursor2, err := coll.FindWithOptions(FindOptions{
+		Filter: nil,
+		Limit:  3,
+	})
+	if err != nil {
+		t.Fatalf("FindWithOptions with Limit: %v", err)
+	}
+
+	count = 0
+	for cursor2.Next() {
+		count++
+	}
+	if count != 3 {
+		t.Errorf("Limit 3: expected 3 results, got %d", count)
+	}
+
+	// Test Skip + Limit
+	cursor3, err := coll.FindWithOptions(FindOptions{
+		Filter: nil,
+		Skip:   2,
+		Limit:  3,
+	})
+	if err != nil {
+		t.Fatalf("FindWithOptions with Skip+Limit: %v", err)
+	}
+
+	count = 0
+	for cursor3.Next() {
+		count++
+	}
+	if count != 3 {
+		t.Errorf("Skip 2 Limit 3: expected 3 results, got %d", count)
+	}
+
+	// Test Skip larger than result set
+	cursor4, err := coll.FindWithOptions(FindOptions{
+		Filter: nil,
+		Skip:   20,
+	})
+	if err != nil {
+		t.Fatalf("FindWithOptions with large Skip: %v", err)
+	}
+
+	count = 0
+	for cursor4.Next() {
+		count++
+	}
+	if count != 0 {
+		t.Errorf("Skip 20: expected 0 results, got %d", count)
+	}
+}
+
+// Test FindWithOptions with descending sort
+func TestFindWithOptions_DescendingSort(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+
+	coll, _ := db.Collection("desc_sort_test")
+
+	// Insert documents
+	for i := 0; i < 5; i++ {
+		coll.InsertOne(map[string]interface{}{"_id": fmt.Sprintf("doc%d", i), "value": i})
+	}
+
+	// Sort descending by value
+	cursor, err := coll.FindWithOptions(FindOptions{
+		Filter: nil,
+		Sort:   map[string]interface{}{"value": -1},
+	})
+	if err != nil {
+		t.Fatalf("FindWithOptions with desc sort: %v", err)
+	}
+
+	var values []int
+	for cursor.Next() {
+		var doc map[string]interface{}
+		cursor.Decode(&doc)
+		values = append(values, doc["value"].(int))
+	}
+
+	// Should be in descending order: 4, 3, 2, 1, 0
+	for i := 0; i < len(values)-1; i++ {
+		if values[i] < values[i+1] {
+			t.Errorf("descending sort failed at position %d: %v", i, values)
+			break
+		}
+	}
+}
+
+// Test Decode with struct pointer
+func TestDecode_StructPointer(t *testing.T) {
+	type Person struct {
+		ID   string `bson:"_id"`
+		Name string `bson:"name"`
+		Age  int    `bson:"age"`
+	}
+
+	db := openTestDB(t)
+	defer db.Close()
+
+	coll, _ := db.Collection("struct_decode_test")
+	coll.InsertOne(map[string]interface{}{"_id": "p1", "name": "Alice", "age": 30})
+
+	cur, _ := coll.Find(map[string]interface{}{"_id": "p1"})
+	defer cur.Close()
+
+	if !cur.Next() {
+		t.Fatal("expected document")
+	}
+
+	var person Person
+	err := cur.Decode(&person)
+	if err != nil {
+		t.Errorf("Decode into struct: %v", err)
+	}
+
+	if person.ID != "p1" || person.Name != "Alice" || person.Age != 30 {
+		t.Errorf("decoded struct = %+v, want {ID:p1 Name:Alice Age:30}", person)
 	}
 }

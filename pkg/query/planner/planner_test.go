@@ -468,6 +468,164 @@ func TestPlannerPlanWithSortNode(t *testing.T) {
 	}
 }
 
+// Test Plan with invalid filter (parse error)
+func TestPlannerPlan_InvalidFilter(t *testing.T) {
+	dir := t.TempDir()
+	opts := engine.DefaultOptions(dir)
+	eng, err := engine.Open(opts)
+	if err != nil {
+		t.Fatalf("open engine: %v", err)
+	}
+	defer eng.Close()
+
+	indexCat := newMockIndexCatalog()
+	statsMgr := newMockStatsManager()
+	planner := NewPlanner(eng, indexCat, statsMgr)
+
+	// Create an invalid filter (use an invalid operator)
+	filter := bson.NewDocument()
+	filter.Set("$invalid", bson.VString("value"))
+
+	planOpts := PlanOptions{
+		Filter: filter,
+	}
+
+	_, err = planner.Plan(context.Background(), "test", "coll", planOpts)
+	if err == nil {
+		t.Error("expected error for invalid filter")
+	}
+}
+
+// Test Plan with empty options
+func TestPlannerPlan_EmptyOptions(t *testing.T) {
+	dir := t.TempDir()
+	opts := engine.DefaultOptions(dir)
+	eng, err := engine.Open(opts)
+	if err != nil {
+		t.Fatalf("open engine: %v", err)
+	}
+	defer eng.Close()
+
+	// Insert test data
+	db, coll := "test", "empty"
+	for i := 0; i < 5; i++ {
+		doc := bson.NewDocument()
+		id := bson.NewObjectID()
+		doc.Set("_id", bson.VObjectID(id))
+		doc.Set("value", bson.VInt32(int32(i)))
+		key := mongo.EncodeDocumentKey(db, coll, id[:])
+		if err := eng.Put(key, bson.Encode(doc)); err != nil {
+			t.Fatalf("put: %v", err)
+		}
+	}
+
+	indexCat := newMockIndexCatalog()
+	statsMgr := newMockStatsManager()
+	planner := NewPlanner(eng, indexCat, statsMgr)
+
+	// Empty options - should do a simple collection scan
+	planOpts := PlanOptions{}
+
+	plan, err := planner.Plan(context.Background(), db, coll, planOpts)
+	if err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+
+	results, err := ExecPlan(context.Background(), plan)
+	if err != nil {
+		t.Fatalf("exec: %v", err)
+	}
+
+	if len(results) != 5 {
+		t.Errorf("expected 5 docs, got %d", len(results))
+	}
+}
+
+// Test matchIndex function
+func TestMatchIndex(t *testing.T) {
+	dir := t.TempDir()
+	opts := engine.DefaultOptions(dir)
+	eng, err := engine.Open(opts)
+	if err != nil {
+		t.Fatalf("open engine: %v", err)
+	}
+	defer eng.Close()
+
+	indexCat := newMockIndexCatalog()
+	statsMgr := newMockStatsManager()
+	planner := NewPlanner(eng, indexCat, statsMgr)
+
+	tests := []struct {
+		name           string
+		indexFields    []mongo.IndexKey
+		filterFields   map[string]interface{}
+		expectedMatch  int
+	}{
+		{
+			name:          "empty index",
+			indexFields:   []mongo.IndexKey{},
+			filterFields:  map[string]interface{}{"a": "value"},
+			expectedMatch: 0,
+		},
+		{
+			name:          "no matching fields",
+			indexFields:   []mongo.IndexKey{{Field: "a", Descending: false}},
+			filterFields:  map[string]interface{}{"b": "value"},
+			expectedMatch: 0,
+		},
+		{
+			name:          "single matching field",
+			indexFields:   []mongo.IndexKey{{Field: "a", Descending: false}},
+			filterFields:  map[string]interface{}{"a": "value"},
+			expectedMatch: 1,
+		},
+		{
+			name: "partial prefix match",
+			indexFields: []mongo.IndexKey{
+				{Field: "a", Descending: false},
+				{Field: "b", Descending: false},
+				{Field: "c", Descending: false},
+			},
+			filterFields:  map[string]interface{}{"a": "value1", "b": "value2"},
+			expectedMatch: 2,
+		},
+		{
+			name: "non-prefix match (stops at first missing)",
+			indexFields: []mongo.IndexKey{
+				{Field: "a", Descending: false},
+				{Field: "b", Descending: false},
+				{Field: "c", Descending: false},
+			},
+			filterFields:  map[string]interface{}{"a": "value1", "c": "value3"},
+			expectedMatch: 1,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			idx := &mongo.IndexSpec{
+				Name: "test_idx",
+				Key:  tc.indexFields,
+			}
+
+			filter := bson.NewDocument()
+			for k, v := range tc.filterFields {
+				switch val := v.(type) {
+				case string:
+					filter.Set(k, bson.VString(val))
+				case int:
+					filter.Set(k, bson.VInt32(int32(val)))
+				}
+			}
+
+			_, score := planner.matchIndex(idx, filter)
+			if score != tc.expectedMatch {
+				t.Errorf("matchIndex() score = %d, want %d", score, tc.expectedMatch)
+			}
+		})
+	}
+}
+
 // Test Plan with filter and no index (should use filter node)
 func TestPlannerPlanWithFilterNoIndex(t *testing.T) {
 	dir := t.TempDir()
